@@ -10,4 +10,9 @@
         <LangVersion>latestmajor</LangVersion>
     </PropertyGroup>
 
+    <ItemGroup>
+      <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+      <PackageReference Include="System.Text.Json" Version="8.0.3" />
+    </ItemGroup>
+
 </Project>
