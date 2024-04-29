@@ -1,4 +1,4 @@
-﻿namespace BusyTagLib.Util;
+﻿namespace BusyTag.Lib.Util;
 
 public struct FileStruct
 {

@@ -1,7 +1,7 @@
 ﻿using System.Collections;
 using System.Text.Json.Serialization;
 
-namespace BusyTagLib.Util;
+namespace BusyTag.Lib.Util;
 
 public class DeviceConfig
 {

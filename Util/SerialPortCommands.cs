@@ -1,6 +1,6 @@
 ﻿using System.Net;
 
-namespace BusyTagLib.Util;
+namespace BusyTag.Lib.Util;
 
 public class SerialPortCommands
 {

@@ -1,9 +1,9 @@
 ﻿using System.Diagnostics;
 using System.IO.Ports;
 using System.Text.Json;
-using BusyTagLib.Util;
+using BusyTag.Lib.Util;
 
-namespace BusyTagLib;
+namespace BusyTag.Lib;
 
 // All the code in this file is included in all platforms.
 public class BusyTag

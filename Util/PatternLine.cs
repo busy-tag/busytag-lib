@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace BusyTagLib.Util;
+namespace BusyTag.Lib.Util;
 
 public class PatternLine(int ledBits, string color, int speed, int delay)
 {

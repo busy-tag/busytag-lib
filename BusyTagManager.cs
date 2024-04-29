@@ -1,8 +1,8 @@
 ﻿using System.Diagnostics;
 using System.IO.Ports;
-using BusyTagLib.Util;
+using BusyTag.Lib.Util;
 
-namespace BusyTagLib;
+namespace BusyTag.Lib;
 
 public class BusyTagManager
 {

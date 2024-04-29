@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BustTag.Lib", "BustTag.Lib.csproj", "{0A004004-2987-4DD5-9F3F-DAD46D2F99EC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BusyTag.Lib", "BusyTag.Lib.csproj", "{0A004004-2987-4DD5-9F3F-DAD46D2F99EC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
