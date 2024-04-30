@@ -517,6 +517,7 @@ public class BusyTag
         {
             using var fs = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             fs.CopyTo(imageStream);
+            imageStream.Seek(0, SeekOrigin.Begin);
         }
         catch
         {
