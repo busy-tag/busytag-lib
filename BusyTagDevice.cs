@@ -125,7 +125,8 @@ public class BusyTagDevice
         const int bufSize = 512;
         var buf = new byte[bufSize];
         // string data = _serialPort.ReadLine();
-        // var len = _serialPort.Read(buf, 0, bufSize);
+        // ReSharper disable once UnusedVariable
+        var len = _serialPort.Read(buf, 0, bufSize);
         // long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         // Trace.WriteLine($"timestamp: {timestamp}, len:{len}");
         var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);

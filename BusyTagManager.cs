@@ -83,7 +83,8 @@ public class BusyTagManager
         var port = (SerialPort)sender;
         const int bufSize = 32;
         var buf = new byte[bufSize];
-        // var len = _serialPort.Read(buf, 0, bufSize);
+        // ReSharper disable once UnusedVariable
+        var len = _serialPort.Read(buf, 0, bufSize);
         var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
         var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{data}");
