@@ -1,70 +1,62 @@
-﻿using System.Diagnostics;
+﻿// ReSharper disable MemberCanBePrivate.Global
+// ReSharper disable UnusedAutoPropertyAccessor.Global
+
+using System.Diagnostics;
 using System.IO.Ports;
 using System.Text.Json;
 using BusyTag.Lib.Util;
+
 
 namespace BusyTag.Lib;
 
 // All the code in this file is included in all platforms.
 public class BusyTag
 {
-    public event EventHandler<bool> ConnectionStateChanged;
-    public event EventHandler<bool> ReceivedDeviceBasicInformation;
-    public event EventHandler<LedArgs> ReceivedSolidColor;
-    public event EventHandler<List<PatternLine>> ReceivedPattern;
-    public event EventHandler<int> ReceivedDisplayBrightness;
-    public event EventHandler<List<string>> FileListUpdated;
-    public event EventHandler<bool> FileUploadFinished;
-    public event EventHandler<string> FirmwareUpdateStatus;
-    private SerialPort? _serialPort;
-    private DeviceConfig _deviceConfig = new DeviceConfig();
+    public event EventHandler<bool>? ConnectionStateChanged;
+    public event EventHandler<bool>? ReceivedDeviceBasicInformation;
+    public event EventHandler<LedArgs>? ReceivedSolidColor;
+    public event EventHandler<List<PatternLine>>? ReceivedPattern;
+    public event EventHandler<int>? ReceivedDisplayBrightness;
+    public event EventHandler<List<string>>? FileListUpdated;
+    public event EventHandler<bool>? FileUploadFinished;
+    public event EventHandler<string>? FirmwareUpdateStatus;
+    private readonly SerialPort? _serialPort;
+    private DeviceConfig _deviceConfig = new();
     // public bool Connected => _serialPort is { IsOpen: true };
 
-    public bool Connected
-    {
-        get
-        {
-            if (_serialPort == null)
-            {
-                return false;
-            }
-            else
-            {
-                return _serialPort.IsOpen;
-            }
-        }
-    }
+    public bool Connected => _serialPort is { IsOpen: true };
+    public string DeviceName { get; private set; } = null!;
+    public string ManufactureName { get; private set; } = null!;
+    public string Id { get; private set; } = null!;
 
-    public string DeviceName { get; private set; }
-    public string ManufactureName { get; private set; }
-    public string Id { get; private set; }
-
-    public string FirmwareVersion { get; private set; }
+    public string FirmwareVersion { get; private set; } = null!;
 
     // public FileStruct[] PictureList { get; private set; }
     // public FileStruct[] FileList { get; private set; }
-    public string LocalHostAddress { get; private set; }
+    public string LocalHostAddress { get; private set; } = null!;
 
     // public long FreeStorageSize { get; private set; }
     // public long TotalStorageSize { get; private set; }
     private DriveInfo? _busyTagDrive;
-    private List<PatternLine> _patternList = new List<PatternLine>();
+    private readonly List<PatternLine> _patternList = [];
 
     private static readonly SerialPortCommands Commands = new();
     private SerialPortCommands.Commands _currentCommand = SerialPortCommands.Commands.GetFirmwareVersion;
     private bool _gotAllBasicInfo;
-    private bool _gotDriveInfo = false;
+    private bool _gotDriveInfo;
+#pragma warning disable CS0414 // Field is assigned but its value is never used
     private bool _canSendNextCommand = true;
-    private bool _receivingPattern = false;
-    private bool _sendingNewPattern = false;
-    private CancellationTokenSource ctsForConnection = new CancellationTokenSource();
+#pragma warning restore CS0414 // Field is assigned but its value is never used
+    private bool _receivingPattern;
+    private bool _sendingNewPattern;
+    private readonly CancellationTokenSource _ctsForConnection = new();
 
     public BusyTag(string portName)
     {
         _serialPort = new SerialPort(portName, 460800, Parity.None, 8, StopBits.One);
         _serialPort.ReadTimeout = 500;
         _serialPort.WriteTimeout = 500;
-        _serialPort.DataReceived += new SerialDataReceivedEventHandler(sp_DataReceived);
+        _serialPort.DataReceived += sp_DataReceived;
     }
 
     private void ConnectionTask(int seconds, CancellationToken token)
@@ -74,11 +66,10 @@ public class BusyTag
             while (!token.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromSeconds(seconds), token);
-                if (!Connected)
-                {
-                    ctsForConnection.Cancel();
-                    ConnectionStateChanged?.Invoke(this, Connected);
-                }
+                if (Connected) continue;
+                
+                _ctsForConnection.Cancel();
+                ConnectionStateChanged?.Invoke(this, Connected);
             }
         }, token);
     }
@@ -86,52 +77,58 @@ public class BusyTag
 
     public void Connect()
     {
+        if (_serialPort == null) return; // TODO Possibly change to exception
+        
         _serialPort.Open();
-        if (Connected)
-        {
-            ConnectionStateChanged?.Invoke(this, true);
-            _gotAllBasicInfo = false;
-            _currentCommand = SerialPortCommands.Commands.GetDeviceName;
-            // SendCommand("AT+GFV\r\n");
-            SendCommand(Commands.GetCommand(_currentCommand));
-            ConnectionTask(1, ctsForConnection.Token);
-        }
+        if (!Connected) return;
+        
+        ConnectionStateChanged?.Invoke(this, true);
+        _gotAllBasicInfo = false;
+        _currentCommand = SerialPortCommands.Commands.GetDeviceName;
+        // SendCommand("AT+GFV\r\n");
+        SendCommand(Commands.GetCommand(_currentCommand));
+        ConnectionTask(1, _ctsForConnection.Token);
     }
 
     public void Disconnect()
     {
+        if (_serialPort == null) return; // TODO Possibly change to exception
+        
         if (Connected)
         {
             _serialPort.Close();
         }
 
-        ctsForConnection.Cancel();
+        _ctsForConnection.Cancel();
         ConnectionStateChanged?.Invoke(this, false);
     }
 
     private void SendCommand(string data)
     {
+        if (_serialPort == null) return; // TODO Possibly change to exception
+        
         // if (!_canSendNextCommand) return false;
-        if (Connected)
-        {
-            long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
-            _serialPort.WriteLine(data);
-            _canSendNextCommand = false;
-        }
+        if (!Connected) return;
+        
+        var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
+        _serialPort.WriteLine(data);
+        _canSendNextCommand = false;
         // return true;
     }
 
     private void sp_DataReceived(object sender, SerialDataReceivedEventArgs e)
     {
+        if (_serialPort == null) return; // TODO Possibly change to exception
+        
         // string data = _serialPort.ReadLine();
-        int buf_size = 512;
-        var buf = new byte[buf_size];
+        const int bufSize = 512;
+        var buf = new byte[bufSize];
         // string data = _serialPort.ReadLine();
-        int len = _serialPort.Read(buf, 0, buf_size);
+        // var len = _serialPort.Read(buf, 0, bufSize);
         // long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         // Trace.WriteLine($"timestamp: {timestamp}, len:{len}");
-        string data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
+        var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
 
         FilterResponse(data);
     }
@@ -267,6 +264,7 @@ public class BusyTag
             {
                 if (!_gotDriveInfo)
                 {
+                    // ReSharper disable once StringLiteralTypo
                     SendCommand("AT+UMSA=1\r\n");
                     _gotDriveInfo = true;
                     _busyTagDrive = FindBusyTagDrive();
@@ -295,55 +293,52 @@ public class BusyTag
 
     public long FreeStorageSize()
     {
-        if (_busyTagDrive != null)
-        {
-            return _busyTagDrive.TotalFreeSpace;
-        }
-
-        return 0;
+        return _busyTagDrive?.TotalFreeSpace ?? 0;
     }
 
     public long TotalStorageSize()
     {
-        if (_busyTagDrive != null)
-        {
-            return _busyTagDrive.TotalSize;
-        }
-
-        return 0;
+        return _busyTagDrive?.TotalSize ?? 0;
     }
 
+    // ReSharper disable once InconsistentNaming
     public void GetSolidColor()
     {
         SendCommand(Commands.GetCommand(SerialPortCommands.Commands.GetSolidColor));
     }
 
+    // ReSharper disable once InconsistentNaming
     public void GetCustomPattern()
     {
         SendCommand(Commands.GetCommand(SerialPortCommands.Commands.GetCustomPattern));
         _patternList.Clear();
     }
 
+    // ReSharper disable once InconsistentNaming
     public void GetDisplayBrightness()
     {
         SendCommand(Commands.GetCommand(SerialPortCommands.Commands.GetDisplayBrightness));
     }
 
+    // ReSharper disable once InconsistentNaming
     public void GetShowAfterDrop()
     {
         SendCommand(Commands.GetCommand(SerialPortCommands.Commands.GetShowAfterDrop));
     }
 
+    // ReSharper disable once InconsistentNaming
     public void GetAllowedWebServer()
     {
         SendCommand(Commands.GetCommand(SerialPortCommands.Commands.GetAllowedWebServer));
     }
 
+    // ReSharper disable once InconsistentNaming
     public void GetWifiConfig()
     {
         SendCommand(Commands.GetCommand(SerialPortCommands.Commands.GetWifiConfig));
     }
 
+    // ReSharper disable once InconsistentNaming
     public void GetUsbMassStorageActive()
     {
         SendCommand(Commands.GetCommand(SerialPortCommands.Commands.GetUsbMassStorageActive));
@@ -351,7 +346,7 @@ public class BusyTag
 
     public void SetSolidColor(string color, int brightness = 100, int ledBits = 127)
     {
-        int bright = (int)(brightness * 2.55);
+        var bright = (int)(brightness * 2.55);
         switch (color)
         {
             case "off":
@@ -386,11 +381,14 @@ public class BusyTag
 
     public void SendRgbColor(int red = 0, int green = 0, int blue = 0, int ledBits = 127)
     {
+        // ReSharper disable once StringLiteralTypo
         SendCommand($"AT+SC={ledBits:d},{red:X2}{green:X2}{blue:X2}\r\n");
     }
 
     public void SetNewCustomPattern(List<PatternLine> list)
     {
+        if (_busyTagDrive == null) return; // TODO Possibly change to exception
+        
         // SendCommand($"AT+CP={list.Count:d}\r\n");
         _patternList.Clear();
         GetConfigJsonFile();
@@ -402,8 +400,8 @@ public class BusyTag
         _deviceConfig.activatePattern = false;
         _deviceConfig.customPatternArr = _patternList;
         
-        string json = JsonSerializer.Serialize(_deviceConfig);
-        string fullPath = Path.Combine(_busyTagDrive.Name, "config.json");
+        var json = JsonSerializer.Serialize(_deviceConfig);
+        var fullPath = Path.Combine(_busyTagDrive.Name, "config.json");
         File.WriteAllText(fullPath, json);
         // PlayPattern(false, _deviceConfig.patternRepeat);
         ActivateFileStorageScan();
@@ -412,55 +410,50 @@ public class BusyTag
 
     public void PlayPattern(bool allow, int repeatCount)
     {
+        // ReSharper disable once StringLiteralTypo
         SendCommand($"AT+PP={(allow ? 1:0)},{repeatCount:d}\r\n");
     }
 
     public void SetDisplayBrightness(int brightness)
     {
+        // ReSharper disable once StringLiteralTypo
         SendCommand($"AT+DB={brightness}\r\n");
     }
 
-    internal static string UnixToDate(long timestamp, string convertFormat)
+    private static string UnixToDate(long timestamp, string convertFormat)
     {
-        DateTime convertedUnixTime = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).DateTime;
+        var convertedUnixTime = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).DateTime;
         return convertedUnixTime.ToString(convertFormat);
     }
 
     private DriveInfo? FindBusyTagDrive()
     {
-        DriveInfo?[] allDrives = DriveInfo.GetDrives();
-        foreach (DriveInfo? d in allDrives)
+        var allDrives = DriveInfo.GetDrives();
+        foreach (var d in allDrives)
         {
+            if (d == null) continue;
             // Trace.WriteLine($"Drive {d.Name}");
             // Trace.WriteLine($"  Drive type: {d.DriveType}");
-            if (d.IsReady == true)
+            if (!d.IsReady) continue;
+            // Trace.WriteLine($"  Volume label: {d.VolumeLabel}" );
+            // Trace.WriteLine($"  File system: {d.DriveFormat}" );
+            // Trace.WriteLine($"  Available space to current user:{d.AvailableFreeSpace} bytes");
+            // Trace.WriteLine($"  Total available space:          {d.TotalFreeSpace} bytes");
+            // Trace.WriteLine($"  Total size of drive:            {d.TotalSize} bytes ");
+            if (d.DriveType != DriveType.Removable) continue;
+            
+            var path = Path.Combine(d.Name, "readme.txt");
+            if (!File.Exists(path)) continue;
+            
+            // Open the file to read from.
+            using var sr = File.OpenText(path);
+            while (sr.ReadLine() is { } s)
             {
-                // Trace.WriteLine($"  Volume label: {d.VolumeLabel}" );
-                // Trace.WriteLine($"  File system: {d.DriveFormat}" );
-                // Trace.WriteLine($"  Available space to current user:{d.AvailableFreeSpace} bytes");
-                // Trace.WriteLine($"  Total available space:          {d.TotalFreeSpace} bytes");
-                // Trace.WriteLine($"  Total size of drive:            {d.TotalSize} bytes ");
-                if (d.DriveType == DriveType.Removable)
-                {
-                    string path = Path.Combine(d.Name, "readme.txt");
-                    if (File.Exists(path))
-                    {
-                        // Open the file to read from.
-                        using (StreamReader sr = File.OpenText(path))
-                        {
-                            string s;
-                            while ((s = sr.ReadLine()) != null)
-                            {
-                                if (s.Contains(LocalHostAddress))
-                                {
-                                    Trace.WriteLine($"Found BusyTag drive: {d.Name}");
-                                    return d;
-                                }
-                                // Trace.WriteLine(s);
-                            }
-                        }
-                    }
-                }
+                if (!s.Contains(LocalHostAddress)) continue;
+                
+                Trace.WriteLine($"Found BusyTag drive: {d.Name}");
+                return d;
+                // Trace.WriteLine(s);
             }
         }
 
@@ -469,11 +462,13 @@ public class BusyTag
 
     public void SendNewFile(string sourcePath)
     {
-        CancellationTokenSource ctsForFileSending = new CancellationTokenSource();
-        Task.Run(async () =>
+        if (_busyTagDrive == null) return; // TODO Possibly change to exception
+        
+        var ctsForFileSending = new CancellationTokenSource();
+        Task.Run(() =>
         {
-            string fileName = Path.GetFileName(sourcePath);
-            string destPath = Path.Combine(_busyTagDrive.Name, fileName);
+            var fileName = Path.GetFileName(sourcePath);
+            var destPath = Path.Combine(_busyTagDrive.Name, fileName);
             File.Copy(sourcePath, destPath, true);
             FileUploadFinished?.Invoke(this, true);
             if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
@@ -484,15 +479,17 @@ public class BusyTag
 
             // GetFileList();
             ctsForFileSending.Cancel();
+            return Task.CompletedTask;
         }, ctsForFileSending.Token);
     }
 
     public void TryToGetFileList()
     {
-        List<string> fileNames = new List<string>();
+        var fileNames = new List<string>();
         if (_busyTagDrive != null)
         {
-            DirectoryInfo di = new DirectoryInfo(_busyTagDrive.Name);
+            var di = new DirectoryInfo(_busyTagDrive.Name);
+            // ReSharper disable once LoopCanBeConvertedToQuery
             foreach (var fi in di.GetFiles())
             {
                 fileNames.Add(fi.Name);
@@ -504,13 +501,20 @@ public class BusyTag
 
     public void DeleteFile(string fileName)
     {
-        string path = Path.Combine(_busyTagDrive.Name, fileName);
+        if (_busyTagDrive == null) return; // TODO Possibly change to exception
+        
+        var path = Path.Combine(_busyTagDrive.Name, fileName);
         File.Delete(path);
+
         // GetFileList();
     }
     
+    // ReSharper disable once InconsistentNaming
     public MemoryStream GetImage(string fileName)
     {
+        if (_busyTagDrive == null) return new MemoryStream(); // TODO Possibly change to exception
+
+        
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         var imageStream = new MemoryStream();
         try
@@ -529,61 +533,71 @@ public class BusyTag
 
     public void ShowPicture(string fileName)
     {
+        // ReSharper disable once StringLiteralTypo
         SendCommand($"AT+SP={fileName}\r\n");
     }
 
     public void RestartDevice()
     {
-        SendCommand($"AT+RST\r\n");
+        // ReSharper disable once StringLiteralTypo
+        SendCommand("AT+RST\r\n");
     }
 
     public void FormatDisk()
     {
-        SendCommand($"AT+FD\r\n");
+        // ReSharper disable once StringLiteralTypo
+        SendCommand("AT+FD\r\n");
     }
 
     public void ActivateFileStorageScan()
     {
-        SendCommand($"AT+AFSS\r\n");
+        // ReSharper disable once StringLiteralTypo
+        SendCommand("AT+AFSS\r\n");
     }
 
+    // ReSharper disable once InconsistentNaming
     private void GetConfigJsonFile()
     {
-        if (_busyTagDrive != null)
+        if (_busyTagDrive == null) return;
+        var path = Path.Combine(_busyTagDrive.Name, "config.json");
+        
+        if (File.Exists(path))
         {
-            string path = Path.Combine(_busyTagDrive.Name, "config.json");
-            if (File.Exists(path))
+            // Open the file to read from.
+            using var sr = File.OpenText(path);
+            var json = sr.ReadToEnd().Trim();
+
+            DeviceConfig? parsedConfig = null;
+            try
             {
-                // Open the file to read from.
-                using (StreamReader sr = File.OpenText(path))
-                {
-                    var json = sr.ReadToEnd().Trim();
-                    // try
-                    // {
-                        _deviceConfig = JsonSerializer.Deserialize<DeviceConfig>(json);
-                    // }
-                    // catch (Exception e)
-                    // {
-                    // }
-                }
+                parsedConfig = JsonSerializer.Deserialize<DeviceConfig>(json);
             }
-            else
+            catch { /* ignored */ }
+
+            if (parsedConfig != null)
             {
-                _deviceConfig = new DeviceConfig();
-                _deviceConfig.Version = 3;
-                _deviceConfig.Image = "def.png";
-                _deviceConfig.showAfterDrop = true;
-                _deviceConfig.allowUsbMsc = true;
-                _deviceConfig.allowFileServer = false;
-                _deviceConfig.dispBrightness = 100;
-                _deviceConfig.solidColor = new DeviceConfig.SolidColor(127,"990000");
-                _deviceConfig.activatePattern = false;
-                _deviceConfig.patternRepeat = 3;
-                List<PatternLine> lines = new List<PatternLine>();
-                lines.Add(new PatternLine(127, "1291AF", 100, 0));
-                lines.Add(new PatternLine(127, "FF0000", 100, 0));
-                _deviceConfig.customPatternArr = lines;
+                _deviceConfig = parsedConfig;
+                return;
             }
         }
+        
+        _deviceConfig = new DeviceConfig
+        {
+            Version = 3,
+            Image = "def.png",
+            showAfterDrop = true,
+            allowUsbMsc = true,
+            allowFileServer = false,
+            dispBrightness = 100,
+            solidColor = new DeviceConfig.SolidColor(127,"990000"),
+            activatePattern = false,
+            patternRepeat = 3
+        };
+        var lines = new List<PatternLine>
+        {
+            new(127, "1291AF", 100, 0),
+            new(127, "FF0000", 100, 0)
+        };
+        _deviceConfig.customPatternArr = lines;
     }
 }

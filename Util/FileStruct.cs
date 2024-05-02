@@ -1,10 +1,14 @@
-﻿namespace BusyTag.Lib.Util;
+﻿// ReSharper disable InconsistentNaming
+// ReSharper disable UnusedAutoPropertyAccessor.Global
+
+namespace BusyTag.Lib.Util;
 
 public struct FileStruct
 {
     
     public enum Type
     {
+        
         File,
         Directory
     }

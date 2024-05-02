@@ -18,24 +18,24 @@ public class BusyTagManager
 
     public void FindBusyTagDevice()
     {
-        CancellationTokenSource ctsForConnection = new CancellationTokenSource();
-        Task.Run(async () =>
+        var ctsForConnection = new CancellationTokenSource();
+        Task.Run(() =>
         {
             string[] ports = SerialPort.GetPortNames();
             _serialDeviceList = new Dictionary<string, bool>();
             // Display each port name to the console.
-            foreach (string port in ports)
+            foreach (var port in ports)
             {
                 Trace.WriteLine(port);
                 _serialDeviceList.Add(port, false);
-                if (_serialPort != null && _serialPort.IsOpen) _serialPort.Close();
+                if (_serialPort is { IsOpen: true }) _serialPort.Close();
                 _serialPort = new SerialPort(port, 460800, Parity.None, 8, StopBits.One);
                 _serialPort.ReadTimeout = 500;
                 _serialPort.WriteTimeout = 500;
                 _serialPort.WriteBufferSize = 8192;
                 _serialPort.ReadBufferSize = 8192;
 
-                _serialPort.DataReceived += new SerialDataReceivedEventHandler(sp_DataReceived);
+                _serialPort.DataReceived += sp_DataReceived;
                 try
                 {
                     _serialPort.Open();
@@ -52,7 +52,8 @@ public class BusyTagManager
                 }
             }
             
-            List<string> busyTagPortList = new List<string>();
+            var busyTagPortList = new List<string>();
+            // ReSharper disable once ForeachCanBeConvertedToQueryUsingAnotherGetEnumerator
             foreach (var item in _serialDeviceList)
             {
                 if (item.Value)
@@ -60,30 +61,34 @@ public class BusyTagManager
                     busyTagPortList.Add(item.Key);
                 }
             }
-            FoundSerialDevices?.Invoke(this, _serialDeviceList);
-            FoundBusyTagSerialDevices?.Invoke(this, busyTagPortList);
+            FoundSerialDevices.Invoke(this, _serialDeviceList);
+            FoundBusyTagSerialDevices.Invoke(this, busyTagPortList);
             ctsForConnection.Cancel(); // Was CancelAsync
+            return Task.CompletedTask;
         }, ctsForConnection.Token);
     }
 
     private void SendCommand(string data)
-        {
-            if (_serialPort != null && _serialPort.IsOpen)
-            {
-                long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
-                _serialPort.WriteLine(data);
-            }
-        }
+    {
+        if (_serialPort is not { IsOpen: true }) return;
+        
+        var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
+        _serialPort.WriteLine(data);
+    }
     private void sp_DataReceived(object sender, SerialDataReceivedEventArgs e)
     {
+        if (_serialPort == null) return; // TODO Possibly change to exception
+        
         var port = (SerialPort)sender;
-        int buf_size = 32;
-        var buf = new byte[buf_size];
-        int len = _serialPort.Read(buf, 0, buf_size);
-        string data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
-        long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        const int bufSize = 32;
+        var buf = new byte[bufSize];
+        // var len = _serialPort.Read(buf, 0, bufSize);
+        var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
+        var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{data}");
+        
+        // ReSharper disable once StringLiteralTypo
         if(data.Contains("+DN:busytag-"))
         {
             _serialDeviceList[port.PortName] = true;
@@ -92,7 +97,7 @@ public class BusyTagManager
         
         private static string UnixToDate(long timestamp, string convertFormat)
         {
-            DateTime convertedUnixTime = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).DateTime;
+            var convertedUnixTime = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).DateTime;
             return convertedUnixTime.ToString(convertFormat);
         }
 }

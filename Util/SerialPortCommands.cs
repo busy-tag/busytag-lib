@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿// ReSharper disable CommentTypo
+// ReSharper disable StringLiteralTypo
 
 namespace BusyTag.Lib.Util;
 
@@ -24,7 +25,7 @@ public class SerialPortCommands
         GetUsbMassStorageActive
     }
 
-    private readonly Dictionary<Commands, string> _commandList = new Dictionary<Commands, string>()
+    private readonly Dictionary<Commands, string> _commandList = new()
     {
         { Commands.GetDeviceName, "AT+GDN\r\n" },
         { Commands.GetManufactureName, "AT+GMN\r\n" },
@@ -44,10 +45,7 @@ public class SerialPortCommands
         { Commands.GetUsbMassStorageActive, "AT+UMSA?\r\n" }
     };
 
-    public SerialPortCommands()
-    {
-    }
-
+    // ReSharper disable once InconsistentNaming
     public string GetCommand(Commands var)
     {
         return _commandList[var];
