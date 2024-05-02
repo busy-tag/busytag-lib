@@ -6,8 +6,8 @@ namespace BusyTag.Lib;
 
 public class BusyTagManager
 {
-    public event EventHandler<Dictionary<string, bool>> FoundSerialDevices = null!;
-    public event EventHandler<List<string>> FoundBusyTagSerialDevices = null!; 
+    public event EventHandler<Dictionary<string, bool>>? FoundSerialDevices;
+    public event EventHandler<List<string>>? FoundBusyTagSerialDevices; 
     private Dictionary<string, bool> _serialDeviceList = new Dictionary<string, bool>();
     private SerialPort? _serialPort;
 
@@ -61,8 +61,8 @@ public class BusyTagManager
                     busyTagPortList.Add(item.Key);
                 }
             }
-            FoundSerialDevices.Invoke(this, _serialDeviceList);
-            FoundBusyTagSerialDevices.Invoke(this, busyTagPortList);
+            FoundSerialDevices?.Invoke(this, _serialDeviceList);
+            FoundBusyTagSerialDevices?.Invoke(this, busyTagPortList);
             ctsForConnection.Cancel(); // Was CancelAsync
             return Task.CompletedTask;
         }, ctsForConnection.Token);
