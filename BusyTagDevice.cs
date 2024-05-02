@@ -10,7 +10,7 @@ using BusyTag.Lib.Util;
 namespace BusyTag.Lib;
 
 // All the code in this file is included in all platforms.
-public class BusyTag
+public class BusyTagDevice
 {
     public event EventHandler<bool>? ConnectionStateChanged;
     public event EventHandler<bool>? ReceivedDeviceBasicInformation;
@@ -51,7 +51,7 @@ public class BusyTag
     private bool _sendingNewPattern;
     private readonly CancellationTokenSource _ctsForConnection = new();
 
-    public BusyTag(string portName)
+    public BusyTagDevice(string portName)
     {
         _serialPort = new SerialPort(portName, 460800, Parity.None, 8, StopBits.One);
         _serialPort.ReadTimeout = 500;
