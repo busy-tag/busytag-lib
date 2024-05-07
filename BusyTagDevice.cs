@@ -10,7 +10,7 @@ using BusyTag.Lib.Util;
 namespace BusyTag.Lib;
 
 // All the code in this file is included in all platforms.
-public class BusyTagDevice
+public class BusyTagDevice(string portName)
 {
     public event EventHandler<bool>? ConnectionStateChanged;
     public event EventHandler<bool>? ReceivedDeviceBasicInformation;
@@ -20,9 +20,9 @@ public class BusyTagDevice
     public event EventHandler<List<string>>? FileListUpdated;
     public event EventHandler<bool>? FileUploadFinished;
     public event EventHandler<string>? FirmwareUpdateStatus;
-    private readonly SerialPort? _serialPort;
+    private SerialPort? _serialPort;
     private DeviceConfig _deviceConfig = new();
-    // public bool Connected => _serialPort is { IsOpen: true };
+    public String PortName { get; private set; } = portName;
 
     public bool Connected => _serialPort is { IsOpen: true };
     public string DeviceName { get; private set; } = null!;
@@ -51,25 +51,17 @@ public class BusyTagDevice
     private bool _sendingNewPattern;
     private readonly CancellationTokenSource _ctsForConnection = new();
 
-    public BusyTagDevice(string portName)
-    {
-        _serialPort = new SerialPort(portName, 460800, Parity.None, 8, StopBits.One);
-        _serialPort.ReadTimeout = 500;
-        _serialPort.WriteTimeout = 500;
-        _serialPort.DataReceived += sp_DataReceived;
-    }
-
-    private void ConnectionTask(int seconds, CancellationToken token)
+    private void ConnectionTask(int milliseconds, CancellationToken token)
     {
         Task.Run(async () =>
         {
             while (!token.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromSeconds(seconds), token);
-                if (Connected) continue;
-                
-                _ctsForConnection.Cancel();
-                ConnectionStateChanged?.Invoke(this, Connected);
+                await Task.Delay(TimeSpan.FromMilliseconds(milliseconds), token);
+                if (!Connected)
+                {
+                    Disconnect();
+                }
             }
         }, token);
     }
@@ -77,44 +69,59 @@ public class BusyTagDevice
 
     public void Connect()
     {
-        if (_serialPort == null) return; // TODO Possibly change to exception
+        _serialPort = new SerialPort(PortName, 460800, Parity.None, 8, StopBits.One);
+        _serialPort.ReadTimeout = 500;
+        _serialPort.WriteTimeout = 500;
+        _serialPort.DataReceived += sp_DataReceived;
+        _serialPort.ErrorReceived += sp_ErrorReceived;
         
         _serialPort.Open();
-        if (!Connected) return;
+        ConnectionStateChanged?.Invoke(this, Connected);
+        if (!Connected)
+        {
+            Disconnect();
+            return;
+        }
         
-        ConnectionStateChanged?.Invoke(this, true);
         _gotAllBasicInfo = false;
         _currentCommand = SerialPortCommands.Commands.GetDeviceName;
-        // SendCommand("AT+GFV\r\n");
         SendCommand(Commands.GetCommand(_currentCommand));
-        ConnectionTask(1, _ctsForConnection.Token);
+        ConnectionTask(1000, _ctsForConnection.Token);
     }
 
     public void Disconnect()
     {
         if (_serialPort == null) return; // TODO Possibly change to exception
         
-        if (Connected)
-        {
-            _serialPort.Close();
-        }
-
-        _ctsForConnection.Cancel();
+        // if (Connected)
+        // {
+        _serialPort.Close();
+        _serialPort.Dispose();
+        // }
+        
         ConnectionStateChanged?.Invoke(this, false);
+        _ctsForConnection.Cancel();
+        _serialPort = null;
+        Trace.WriteLine($"_serialPort: {_serialPort.ToString()}");
     }
 
-    private void SendCommand(string data)
+    public SerialPort? SerialPort()
     {
-        if (_serialPort == null) return; // TODO Possibly change to exception
+        return _serialPort;
+    }
+
+    private bool SendCommand(string data)
+    {
+        if (_serialPort == null) return false; // TODO Possibly change to exception
         
         // if (!_canSendNextCommand) return false;
-        if (!Connected) return;
+        if (!Connected) return false;
         
         var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
         _serialPort.WriteLine(data);
-        _canSendNextCommand = false;
-        // return true;
+        _canSendNextCommand = false; 
+        return true;
     }
 
     private void sp_DataReceived(object sender, SerialDataReceivedEventArgs e)
@@ -132,6 +139,11 @@ public class BusyTagDevice
         var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
 
         FilterResponse(data);
+    }
+
+    private void sp_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
+    {
+        Trace.WriteLine(e.ToString());
     }
 
     private void FilterResponse(string data)
@@ -249,7 +261,6 @@ public class BusyTagDevice
                     foreach (var item in _patternList)
                     {
                         SendCommand($"+CP:{item.ledBits},{item.color},{item.speed},{item.delay}\r\n");
-                        // Thread.Sleep(100);
                     }
 
                     _sendingNewPattern = false;
@@ -441,7 +452,7 @@ public class BusyTagDevice
             // Trace.WriteLine($"  Available space to current user:{d.AvailableFreeSpace} bytes");
             // Trace.WriteLine($"  Total available space:          {d.TotalFreeSpace} bytes");
             // Trace.WriteLine($"  Total size of drive:            {d.TotalSize} bytes ");
-            if (d.DriveType != DriveType.Removable) continue;
+            // if (d.DriveType != DriveType.Removable) continue;
             
             var path = Path.Combine(d.Name, "readme.txt");
             if (!File.Exists(path)) continue;
@@ -530,6 +541,13 @@ public class BusyTagDevice
         }
         
         return imageStream;
+    }
+
+    public bool FileExists(string fileName)
+    {
+        if (_busyTagDrive == null) return false;
+        var path = Path.Combine(_busyTagDrive.Name, fileName);
+        return File.Exists(path);
     }
 
     public void ShowPicture(string fileName)
