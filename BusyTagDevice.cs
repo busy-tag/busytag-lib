@@ -102,7 +102,6 @@ public class BusyTagDevice(string portName)
         ConnectionStateChanged?.Invoke(this, false);
         _ctsForConnection.Cancel();
         _serialPort = null;
-        Trace.WriteLine($"_serialPort: {_serialPort.ToString()}");
     }
 
     public SerialPort? SerialPort()
@@ -399,25 +398,31 @@ public class BusyTagDevice(string portName)
 
     public void SetNewCustomPattern(List<PatternLine> list)
     {
-        if (_busyTagDrive == null) return; // TODO Possibly change to exception
-        
-        // SendCommand($"AT+CP={list.Count:d}\r\n");
         _patternList.Clear();
-        GetConfigJsonFile();
         foreach (var item in list)
         {
             _patternList.Add(item);
         }
-
-        _deviceConfig.activatePattern = false;
-        _deviceConfig.customPatternArr = _patternList;
         
-        var json = JsonSerializer.Serialize(_deviceConfig);
-        var fullPath = Path.Combine(_busyTagDrive.Name, "config.json");
-        File.WriteAllText(fullPath, json);
-        // PlayPattern(false, _deviceConfig.patternRepeat);
-        ActivateFileStorageScan();
-        // _sendingNewPattern = true;
+        if (float.Parse(FirmwareVersion) >= 0.8)
+        {
+            SendCommand($"AT+CP={list.Count:d}\r\n");
+            _sendingNewPattern = true;
+        }
+        else
+        {
+            if (_busyTagDrive == null) return; // TODO Possibly change to exception
+            
+            GetConfigJsonFile();
+            _deviceConfig.activatePattern = false;
+            _deviceConfig.customPatternArr = _patternList;
+        
+            var json = JsonSerializer.Serialize(_deviceConfig);
+            var fullPath = Path.Combine(_busyTagDrive.Name, "config.json");
+            File.WriteAllText(fullPath, json);
+            // PlayPattern(false, _deviceConfig.patternRepeat);
+            ActivateFileStorageScan();
+        }
     }
 
     public void PlayPattern(bool allow, int repeatCount)
