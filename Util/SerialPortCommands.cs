@@ -22,7 +22,8 @@ public class SerialPortCommands
         GetShowAfterDrop,
         GetAllowedWebServer,
         GetWifiConfig,
-        GetUsbMassStorageActive
+        GetUsbMassStorageActive,
+        SetUsbMassStorageActive
     }
 
     private readonly Dictionary<Commands, string> _commandList = new()
@@ -42,7 +43,8 @@ public class SerialPortCommands
         { Commands.GetShowAfterDrop, "AT+SAD?\r\n" },
         { Commands.GetAllowedWebServer, "AT+AWFS?\r\n" },
         { Commands.GetWifiConfig, "AT+WC?\r\n" },
-        { Commands.GetUsbMassStorageActive, "AT+UMSA?\r\n" }
+        { Commands.GetUsbMassStorageActive, "AT+UMSA?\r\n" },
+        { Commands.SetUsbMassStorageActive, "AT+UMSA=1\r\n"}
     };
 
     // ReSharper disable once InconsistentNaming

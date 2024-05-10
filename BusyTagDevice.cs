@@ -22,7 +22,7 @@ public class BusyTagDevice(string portName)
     public event EventHandler<string>? FirmwareUpdateStatus;
     private SerialPort? _serialPort;
     private DeviceConfig _deviceConfig = new();
-    public String PortName { get; private set; } = portName;
+    public string PortName { get; private set; } = portName;
 
     public bool Connected => _serialPort is { IsOpen: true };
     public string DeviceName { get; private set; } = null!;
@@ -30,6 +30,7 @@ public class BusyTagDevice(string portName)
     public string Id { get; private set; } = null!;
 
     public string FirmwareVersion { get; private set; } = null!;
+    public float FirmwareVersionFloat { get; private set; }
 
     // public FileStruct[] PictureList { get; private set; }
     // public FileStruct[] FileList { get; private set; }
@@ -179,6 +180,7 @@ public class BusyTagDevice(string portName)
                     else if (parts[0].Equals("+FV"))
                     {
                         FirmwareVersion = parts[1].Trim();
+                        FirmwareVersionFloat = float.Parse(FirmwareVersion);
                         _canSendNextCommand = true;
                     }
                     else if (parts[0].Equals("+PL"))
@@ -271,12 +273,14 @@ public class BusyTagDevice(string portName)
         if (!_gotAllBasicInfo)
         {
             _currentCommand++;
-            if (_currentCommand > SerialPortCommands.Commands.GetUsbMassStorageActive)
+            if (_currentCommand > SerialPortCommands.Commands.SetUsbMassStorageActive)
             {
                 if (!_gotDriveInfo)
                 {
-                    // ReSharper disable once StringLiteralTypo
-                    SendCommand("AT+UMSA=1\r\n");
+                    if (FirmwareVersionFloat >= 0.8)
+                    {
+                        SetAllowedAutoStorageScan(false);
+                    }
                     _gotDriveInfo = true;
                     _busyTagDrive = FindBusyTagDrive();
                     TryToGetFileList();
@@ -404,7 +408,7 @@ public class BusyTagDevice(string portName)
             _patternList.Add(item);
         }
         
-        if (float.Parse(FirmwareVersion) >= 0.8)
+        if (FirmwareVersionFloat >= 0.8)
         {
             SendCommand($"AT+CP={list.Count:d}\r\n");
             _sendingNewPattern = true;
@@ -435,6 +439,12 @@ public class BusyTagDevice(string portName)
     {
         // ReSharper disable once StringLiteralTypo
         SendCommand($"AT+DB={brightness}\r\n");
+    }
+    
+    public void SetAllowedAutoStorageScan(bool enabled)
+    {
+        // ReSharper disable once StringLiteralTypo
+        SendCommand($"AT+AASS={(enabled ? 1:0)}\r\n");
     }
 
     private static string UnixToDate(long timestamp, string convertFormat)
