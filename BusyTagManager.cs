@@ -7,7 +7,7 @@ namespace BusyTag.Lib;
 public class BusyTagManager
 {
     public event EventHandler<Dictionary<string, bool>>? FoundSerialDevices;
-    public event EventHandler<List<string>>? FoundBusyTagSerialDevices; 
+    public event EventHandler<List<string>>? FoundBusyTagSerialDevices;
     private Dictionary<string, bool> _serialDeviceList = new Dictionary<string, bool>();
     private SerialPort? _serialPort;
 
@@ -26,7 +26,7 @@ public class BusyTagManager
             // Display each port name to the console.
             foreach (var port in ports)
             {
-                Trace.WriteLine(port);
+                // Trace.WriteLine(port);
                 _serialDeviceList.Add(port, false);
                 if (_serialPort is { IsOpen: true }) _serialPort.Close();
                 _serialPort = new SerialPort(port, 460800, Parity.None, 8, StopBits.One);
@@ -36,6 +36,7 @@ public class BusyTagManager
                 _serialPort.ReadBufferSize = 8192;
 
                 _serialPort.DataReceived += sp_DataReceived;
+                _serialPort.ErrorReceived += sp_ErrorReceived;
                 try
                 {
                     _serialPort.Open();
@@ -51,7 +52,7 @@ public class BusyTagManager
                     Trace.WriteLine($"Error: {e.Message}");
                 }
             }
-            
+
             var busyTagPortList = new List<string>();
             // ReSharper disable once ForeachCanBeConvertedToQueryUsingAnotherGetEnumerator
             foreach (var item in _serialDeviceList)
@@ -61,6 +62,7 @@ public class BusyTagManager
                     busyTagPortList.Add(item.Key);
                 }
             }
+
             FoundSerialDevices?.Invoke(this, _serialDeviceList);
             FoundBusyTagSerialDevices?.Invoke(this, busyTagPortList);
             ctsForConnection.Cancel(); // Was CancelAsync
@@ -71,15 +73,16 @@ public class BusyTagManager
     private void SendCommand(string data)
     {
         if (_serialPort is not { IsOpen: true }) return;
-        
+
         var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
         _serialPort.WriteLine(data);
     }
+
     private void sp_DataReceived(object sender, SerialDataReceivedEventArgs e)
     {
         if (_serialPort == null) return; // TODO Possibly change to exception
-        
+
         var port = (SerialPort)sender;
         const int bufSize = 32;
         var buf = new byte[bufSize];
@@ -88,17 +91,22 @@ public class BusyTagManager
         var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
         var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{data}");
-        
+
         // ReSharper disable once StringLiteralTypo
-        if(data.Contains("+DN:busytag-"))
+        if (data.Contains("+DN:busytag-"))
         {
             _serialDeviceList[port.PortName] = true;
         }
     }
-        
-        private static string UnixToDate(long timestamp, string convertFormat)
-        {
-            var convertedUnixTime = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).DateTime;
-            return convertedUnixTime.ToString(convertFormat);
-        }
+
+    private void sp_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
+    {
+        Trace.WriteLine(e.ToString());
+    }
+
+    private static string UnixToDate(long timestamp, string convertFormat)
+    {
+        var convertedUnixTime = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).DateTime;
+        return convertedUnixTime.ToString(convertFormat);
+    }
 }

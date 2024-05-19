@@ -20,9 +20,10 @@ public class BusyTagDevice(string portName)
     public event EventHandler<List<string>>? FileListUpdated;
     public event EventHandler<bool>? FileUploadFinished;
     public event EventHandler<string>? FirmwareUpdateStatus;
+    public event EventHandler<bool>? PlayPatternStatus;
     private SerialPort? _serialPort;
     private DeviceConfig _deviceConfig = new();
-    public String PortName { get; private set; } = portName;
+    public string PortName { get; private set; } = portName;
 
     public bool Connected => _serialPort is { IsOpen: true };
     public string DeviceName { get; private set; } = null!;
@@ -30,6 +31,7 @@ public class BusyTagDevice(string portName)
     public string Id { get; private set; } = null!;
 
     public string FirmwareVersion { get; private set; } = null!;
+    public float FirmwareVersionFloat { get; private set; }
 
     // public FileStruct[] PictureList { get; private set; }
     // public FileStruct[] FileList { get; private set; }
@@ -49,6 +51,8 @@ public class BusyTagDevice(string portName)
 #pragma warning restore CS0414 // Field is assigned but its value is never used
     private bool _receivingPattern;
     private bool _sendingNewPattern;
+    private bool _isPlayingPattern = false;
+    private bool _playPatternAfterSending = false;
     private readonly CancellationTokenSource _ctsForConnection = new();
 
     private void ConnectionTask(int milliseconds, CancellationToken token)
@@ -74,7 +78,7 @@ public class BusyTagDevice(string portName)
         _serialPort.WriteTimeout = 500;
         _serialPort.DataReceived += sp_DataReceived;
         _serialPort.ErrorReceived += sp_ErrorReceived;
-        
+
         _serialPort.Open();
         ConnectionStateChanged?.Invoke(this, Connected);
         if (!Connected)
@@ -82,7 +86,7 @@ public class BusyTagDevice(string portName)
             Disconnect();
             return;
         }
-        
+
         _gotAllBasicInfo = false;
         _currentCommand = SerialPortCommands.Commands.GetDeviceName;
         SendCommand(Commands.GetCommand(_currentCommand));
@@ -92,13 +96,13 @@ public class BusyTagDevice(string portName)
     public void Disconnect()
     {
         if (_serialPort == null) return; // TODO Possibly change to exception
-        
+
         // if (Connected)
         // {
         _serialPort.Close();
         _serialPort.Dispose();
         // }
-        
+
         ConnectionStateChanged?.Invoke(this, false);
         _ctsForConnection.Cancel();
         _serialPort = null;
@@ -112,21 +116,21 @@ public class BusyTagDevice(string portName)
     private bool SendCommand(string data)
     {
         if (_serialPort == null) return false; // TODO Possibly change to exception
-        
+
         // if (!_canSendNextCommand) return false;
         if (!Connected) return false;
-        
+
         var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
         _serialPort.WriteLine(data);
-        _canSendNextCommand = false; 
+        _canSendNextCommand = false;
         return true;
     }
 
     private void sp_DataReceived(object sender, SerialDataReceivedEventArgs e)
     {
         if (_serialPort == null) return; // TODO Possibly change to exception
-        
+
         // string data = _serialPort.ReadLine();
         const int bufSize = 512;
         var buf = new byte[bufSize];
@@ -179,6 +183,7 @@ public class BusyTagDevice(string portName)
                     else if (parts[0].Equals("+FV"))
                     {
                         FirmwareVersion = parts[1].Trim();
+                        FirmwareVersionFloat = float.Parse(FirmwareVersion);
                         _canSendNextCommand = true;
                     }
                     else if (parts[0].Equals("+PL"))
@@ -230,7 +235,7 @@ public class BusyTagDevice(string portName)
                     {
                         ReceivedDisplayBrightness?.Invoke(this, int.Parse(parts[1].Trim()));
                     }
-                    else if(parts[0].Equals("+evn"))
+                    else if (parts[0].Equals("+evn"))
                     {
                         var args = parts[1].Split(',');
                         if (args.Length >= 2)
@@ -238,6 +243,14 @@ public class BusyTagDevice(string portName)
                             if (args[0].Equals("FU"))
                             {
                                 FirmwareUpdateStatus?.Invoke(this, args[1]);
+                            }
+                            else if (args[0].Equals("PP"))
+                            {
+                                _isPlayingPattern = int.Parse(args[1]) != 0;
+                                PlayPatternStatus?.Invoke(this, _isPlayingPattern);
+                            }
+                            else if (args[0].Equals("WIS"))
+                            {
                             }
                         }
                     }
@@ -247,12 +260,17 @@ public class BusyTagDevice(string portName)
             {
                 if (line.Equals("OK"))
                 {
-                    // Trace.WriteLine("Received: OK");
+                    Trace.WriteLine("Received: OK");
                     _canSendNextCommand = true;
                     if (_receivingPattern)
                     {
+                        Trace.WriteLine($"_receivingPattern: {_receivingPattern}");
                         ReceivedPattern?.Invoke(this, _patternList);
                         _receivingPattern = false;
+                        if (_playPatternAfterSending)
+                        {
+                            PlayPattern(true, 5);
+                        }
                     }
                 }
                 else if (line.Equals(">") && _sendingNewPattern)
@@ -263,6 +281,10 @@ public class BusyTagDevice(string portName)
                     }
 
                     _sendingNewPattern = false;
+                    if (_playPatternAfterSending)
+                    {
+                        PlayPattern(true, 5);
+                    }
                 }
             }
         }
@@ -271,12 +293,15 @@ public class BusyTagDevice(string portName)
         if (!_gotAllBasicInfo)
         {
             _currentCommand++;
-            if (_currentCommand > SerialPortCommands.Commands.GetUsbMassStorageActive)
+            if (_currentCommand > SerialPortCommands.Commands.SetUsbMassStorageActive)
             {
                 if (!_gotDriveInfo)
                 {
-                    // ReSharper disable once StringLiteralTypo
-                    SendCommand("AT+UMSA=1\r\n");
+                    if (FirmwareVersionFloat > 0.7)
+                    {
+                        SetAllowedAutoStorageScan(false);
+                    }
+
                     _gotDriveInfo = true;
                     _busyTagDrive = FindBusyTagDrive();
                     TryToGetFileList();
@@ -396,15 +421,18 @@ public class BusyTagDevice(string portName)
         SendCommand($"AT+SC={ledBits:d},{red:X2}{green:X2}{blue:X2}\r\n");
     }
 
-    public void SetNewCustomPattern(List<PatternLine> list)
+    public void SetNewCustomPattern(List<PatternLine> list, bool playAfterSending)
     {
+        if (_isPlayingPattern)
+            PlayPattern(false, 5);
+        _playPatternAfterSending = playAfterSending;
         _patternList.Clear();
         foreach (var item in list)
         {
             _patternList.Add(item);
         }
-        
-        if (float.Parse(FirmwareVersion) >= 0.8)
+
+        if (FirmwareVersionFloat > 0.8)
         {
             SendCommand($"AT+CP={list.Count:d}\r\n");
             _sendingNewPattern = true;
@@ -412,11 +440,11 @@ public class BusyTagDevice(string portName)
         else
         {
             if (_busyTagDrive == null) return; // TODO Possibly change to exception
-            
+
             GetConfigJsonFile();
             _deviceConfig.activatePattern = false;
             _deviceConfig.customPatternArr = _patternList;
-        
+
             var json = JsonSerializer.Serialize(_deviceConfig);
             var fullPath = Path.Combine(_busyTagDrive.Name, "config.json");
             File.WriteAllText(fullPath, json);
@@ -428,13 +456,19 @@ public class BusyTagDevice(string portName)
     public void PlayPattern(bool allow, int repeatCount)
     {
         // ReSharper disable once StringLiteralTypo
-        SendCommand($"AT+PP={(allow ? 1:0)},{repeatCount:d}\r\n");
+        SendCommand($"AT+PP={(allow ? 1 : 0)},{repeatCount:d}\r\n");
     }
 
     public void SetDisplayBrightness(int brightness)
     {
         // ReSharper disable once StringLiteralTypo
         SendCommand($"AT+DB={brightness}\r\n");
+    }
+
+    public void SetAllowedAutoStorageScan(bool enabled)
+    {
+        // ReSharper disable once StringLiteralTypo
+        SendCommand($"AT+AASS={(enabled ? 1 : 0)}\r\n");
     }
 
     private static string UnixToDate(long timestamp, string convertFormat)
@@ -458,17 +492,17 @@ public class BusyTagDevice(string portName)
             // Trace.WriteLine($"  Total available space:          {d.TotalFreeSpace} bytes");
             // Trace.WriteLine($"  Total size of drive:            {d.TotalSize} bytes ");
             // if (d.DriveType != DriveType.Removable) continue;
-            
+
             var path = Path.Combine(d.Name, "readme.txt");
             if (!File.Exists(path)) continue;
-            
+
             // Open the file to read from.
             using var sr = File.OpenText(path);
             while (sr.ReadLine() is { } s)
             {
                 if (!s.Contains(LocalHostAddress)) continue;
-                
-                Trace.WriteLine($"Found BusyTag drive: {d.Name}");
+
+                // Trace.WriteLine($"Found BusyTag drive: {d.Name}");
                 return d;
                 // Trace.WriteLine(s);
             }
@@ -480,7 +514,7 @@ public class BusyTagDevice(string portName)
     public void SendNewFile(string sourcePath)
     {
         if (_busyTagDrive == null) return; // TODO Possibly change to exception
-        
+
         var ctsForFileSending = new CancellationTokenSource();
         Task.Run(() =>
         {
@@ -491,6 +525,7 @@ public class BusyTagDevice(string portName)
             if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
                 fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
             {
+                // Thread.Sleep(500);
                 ShowPicture(fileName);
             }
 
@@ -519,19 +554,19 @@ public class BusyTagDevice(string portName)
     public void DeleteFile(string fileName)
     {
         if (_busyTagDrive == null) return; // TODO Possibly change to exception
-        
+
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         File.Delete(path);
 
         // GetFileList();
     }
-    
+
     // ReSharper disable once InconsistentNaming
     public MemoryStream GetImage(string fileName)
     {
         if (_busyTagDrive == null) return new MemoryStream(); // TODO Possibly change to exception
 
-        
+
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         var imageStream = new MemoryStream();
         try
@@ -544,7 +579,7 @@ public class BusyTagDevice(string portName)
         {
             Trace.WriteLine("Had an error while trying to read image");
         }
-        
+
         return imageStream;
     }
 
@@ -584,7 +619,7 @@ public class BusyTagDevice(string portName)
     {
         if (_busyTagDrive == null) return;
         var path = Path.Combine(_busyTagDrive.Name, "config.json");
-        
+
         if (File.Exists(path))
         {
             // Open the file to read from.
@@ -596,7 +631,10 @@ public class BusyTagDevice(string portName)
             {
                 parsedConfig = JsonSerializer.Deserialize<DeviceConfig>(json);
             }
-            catch { /* ignored */ }
+            catch
+            {
+                /* ignored */
+            }
 
             if (parsedConfig != null)
             {
@@ -604,7 +642,7 @@ public class BusyTagDevice(string portName)
                 return;
             }
         }
-        
+
         _deviceConfig = new DeviceConfig
         {
             Version = 3,
@@ -613,7 +651,7 @@ public class BusyTagDevice(string portName)
             allowUsbMsc = true,
             allowFileServer = false,
             dispBrightness = 100,
-            solidColor = new DeviceConfig.SolidColor(127,"990000"),
+            solidColor = new DeviceConfig.SolidColor(127, "990000"),
             activatePattern = false,
             patternRepeat = 3
         };
