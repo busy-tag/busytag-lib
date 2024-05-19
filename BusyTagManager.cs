@@ -8,8 +8,9 @@ public class BusyTagManager
 {
     public event EventHandler<Dictionary<string, bool>>? FoundSerialDevices;
     public event EventHandler<List<string>>? FoundBusyTagSerialDevices;
-    private Dictionary<string, bool> _serialDeviceList = new Dictionary<string, bool>();
+    private Dictionary<string, bool> _serialDeviceList = new();
     private SerialPort? _serialPort;
+    private static bool _isScanningForDevices = false;
 
     public string[] AllSerialPorts()
     {
@@ -18,6 +19,8 @@ public class BusyTagManager
 
     public void FindBusyTagDevice()
     {
+        if (_isScanningForDevices) return;
+        _isScanningForDevices = true;
         var ctsForConnection = new CancellationTokenSource();
         Task.Run(() =>
         {
@@ -65,6 +68,7 @@ public class BusyTagManager
 
             FoundSerialDevices?.Invoke(this, _serialDeviceList);
             FoundBusyTagSerialDevices?.Invoke(this, busyTagPortList);
+            _isScanningForDevices = false;
             ctsForConnection.Cancel(); // Was CancelAsync
             return Task.CompletedTask;
         }, ctsForConnection.Token);

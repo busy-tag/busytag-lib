@@ -293,7 +293,7 @@ public class BusyTagDevice(string portName)
         if (!_gotAllBasicInfo)
         {
             _currentCommand++;
-            if (_currentCommand > SerialPortCommands.Commands.SetUsbMassStorageActive)
+            if (_currentCommand > SerialPortCommands.Commands.GetUsbMassStorageActive)
             {
                 if (!_gotDriveInfo)
                 {
@@ -424,7 +424,12 @@ public class BusyTagDevice(string portName)
     public void SetNewCustomPattern(List<PatternLine> list, bool playAfterSending)
     {
         if (_isPlayingPattern)
-            PlayPattern(false, 5);
+        {
+            PlayPattern(false, 3);
+            if (FirmwareVersionFloat < 1.1)
+                Thread.Sleep(200);
+        }
+
         _playPatternAfterSending = playAfterSending;
         _patternList.Clear();
         foreach (var item in list)
