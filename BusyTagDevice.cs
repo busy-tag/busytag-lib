@@ -19,11 +19,12 @@ public class BusyTagDevice(string portName)
     public event EventHandler<int>? ReceivedDisplayBrightness;
     public event EventHandler<List<string>>? FileListUpdated;
     public event EventHandler<bool>? FileUploadFinished;
-    public event EventHandler<string>? FirmwareUpdateStatus;
+    public event EventHandler<UploadProgressArgs>? FileUploadProgress;
+    public event EventHandler<float>? FirmwareUpdateStatus;
     public event EventHandler<bool>? PlayPatternStatus;
     private SerialPort? _serialPort;
     private DeviceConfig _deviceConfig = new();
-    public string PortName { get; private set; } = portName;
+    public string PortName { get; } = portName;
 
     public bool Connected => _serialPort is { IsOpen: true };
     public string DeviceName { get; private set; } = null!;
@@ -46,9 +47,6 @@ public class BusyTagDevice(string portName)
     private SerialPortCommands.Commands _currentCommand = SerialPortCommands.Commands.GetFirmwareVersion;
     private bool _gotAllBasicInfo;
     private bool _gotDriveInfo;
-#pragma warning disable CS0414 // Field is assigned but its value is never used
-    private bool _canSendNextCommand = true;
-#pragma warning restore CS0414 // Field is assigned but its value is never used
     private bool _receivingPattern;
     private bool _sendingNewPattern;
     private bool _isPlayingPattern = false;
@@ -117,13 +115,11 @@ public class BusyTagDevice(string portName)
     {
         if (_serialPort == null) return false; // TODO Possibly change to exception
 
-        // if (!_canSendNextCommand) return false;
         if (!Connected) return false;
 
         var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
         _serialPort.WriteLine(data);
-        _canSendNextCommand = false;
         return true;
     }
 
@@ -168,23 +164,19 @@ public class BusyTagDevice(string portName)
                     {
                         DeviceName = parts[1].Trim();
                         LocalHostAddress = $"http://{DeviceName}.local";
-                        _canSendNextCommand = true;
                     }
                     else if (parts[0].Equals("+MN"))
                     {
                         ManufactureName = parts[1].Trim();
-                        _canSendNextCommand = true;
                     }
                     else if (parts[0].Equals("+ID"))
                     {
                         Id = parts[1].Trim();
-                        _canSendNextCommand = true;
                     }
                     else if (parts[0].Equals("+FV"))
                     {
                         FirmwareVersion = parts[1].Trim();
                         FirmwareVersionFloat = float.Parse(FirmwareVersion);
-                        _canSendNextCommand = true;
                     }
                     else if (parts[0].Equals("+PL"))
                     {
@@ -199,12 +191,10 @@ public class BusyTagDevice(string portName)
                     else if (parts[0].Equals("+FSS"))
                     {
                         // FreeStorageSize = long.Parse(parts[1]);
-                        _canSendNextCommand = true;
                     }
                     else if (parts[0].Equals("+TSS"))
                     {
                         // TotalStorageSize = long.Parse(parts[1]);
-                        _canSendNextCommand = true;
                     }
                     else if (parts[0].Equals("+SC"))
                     {
@@ -218,8 +208,6 @@ public class BusyTagDevice(string portName)
                             };
                             ReceivedSolidColor?.Invoke(this, eventArgs);
                         }
-
-                        _canSendNextCommand = true;
                     }
                     else if (parts[0].Equals("+CP"))
                     {
@@ -242,7 +230,8 @@ public class BusyTagDevice(string portName)
                         {
                             if (args[0].Equals("FU"))
                             {
-                                FirmwareUpdateStatus?.Invoke(this, args[1]);
+                                var progress = float.Parse(args[1].Remove(args[1].Length-1));
+                                FirmwareUpdateStatus?.Invoke(this, progress);
                             }
                             else if (args[0].Equals("PP"))
                             {
@@ -260,11 +249,10 @@ public class BusyTagDevice(string portName)
             {
                 if (line.Equals("OK"))
                 {
-                    Trace.WriteLine("Received: OK");
-                    _canSendNextCommand = true;
+                    // Trace.WriteLine("Received: OK");
                     if (_receivingPattern)
                     {
-                        Trace.WriteLine($"_receivingPattern: {_receivingPattern}");
+                        // Trace.WriteLine($"_receivingPattern: {_receivingPattern}");
                         ReceivedPattern?.Invoke(this, _patternList);
                         _receivingPattern = false;
                         if (_playPatternAfterSending)
@@ -289,7 +277,6 @@ public class BusyTagDevice(string portName)
             }
         }
 
-        // if (!_gotAllBasicInfo && _canSendNextCommand)
         if (!_gotAllBasicInfo)
         {
             _currentCommand++;
@@ -540,6 +527,47 @@ public class BusyTagDevice(string portName)
         }, ctsForFileSending.Token);
     }
 
+    public void SendNewFileWithProgressEvents(string sourcePath)
+    {
+        if (_busyTagDrive == null) return; // TODO Possibly change to exception
+        var ctsForFileSending = new CancellationTokenSource();
+        Task.Run(() =>
+        {
+            var fileName = Path.GetFileName(sourcePath);
+            var destPath = Path.Combine(_busyTagDrive.Name, fileName);
+            var args = new UploadProgressArgs
+            {
+                FileName = fileName,
+                ProgressLevel = 0.0f
+            };
+
+            var fsOut = new FileStream(destPath, FileMode.Create);
+            var fsIn = new FileStream(sourcePath, FileMode.Open);
+            var bt = new byte[4096];
+            int readByte;
+            while ((readByte = fsIn.Read(bt, 0, bt.Length)) > 0)
+            {
+                fsOut.Write(bt, 0, readByte);
+                args.ProgressLevel = (float)(fsIn.Position * 100.0 / fsIn.Length);
+                FileUploadProgress?.Invoke(this, args);
+            }
+            fsIn.Close();
+            fsOut.Close();
+            
+            FileUploadFinished?.Invoke(this, true);
+            if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
+                fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
+            {
+                // Thread.Sleep(500);
+                ShowPicture(fileName);
+            }
+
+            // GetFileList();
+            ctsForFileSending.Cancel();
+            return Task.CompletedTask;
+        }, ctsForFileSending.Token);
+    }
+
     public void TryToGetFileList()
     {
         var fileNames = new List<string>();
@@ -561,7 +589,14 @@ public class BusyTagDevice(string portName)
         if (_busyTagDrive == null) return; // TODO Possibly change to exception
 
         var path = Path.Combine(_busyTagDrive.Name, fileName);
-        File.Delete(path);
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception e)
+        {
+            // ignored
+        }
 
         // GetFileList();
     }
