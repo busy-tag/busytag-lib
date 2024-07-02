@@ -30,7 +30,7 @@ public class BusyTagManager
             foreach (var port in ports)
             {
                 // Trace.WriteLine(port);
-                _serialDeviceList.Add(port, false);
+                _serialDeviceList[port] = false;
                 if (_serialPort is { IsOpen: true }) _serialPort.Close();
                 _serialPort = new SerialPort(port, 460800, Parity.None, 8, StopBits.One);
                 _serialPort.ReadTimeout = 500;
