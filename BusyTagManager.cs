@@ -52,7 +52,7 @@ public class BusyTagManager
                 }
                 catch (Exception e)
                 {
-                    Trace.WriteLine($"Error: {e.Message}");
+                    // Trace.WriteLine($"Error: {e.Message}");
                 }
             }
 
