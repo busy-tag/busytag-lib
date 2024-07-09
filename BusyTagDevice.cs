@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO.Ports;
 using System.Text.Json;
 using BusyTag.Lib.Util;
+using BusyTag.Lib.Util.DevEventArgs;
 
 
 namespace BusyTag.Lib;
@@ -16,6 +17,10 @@ public class BusyTagDevice(string portName)
     public event EventHandler<bool>? ReceivedDeviceBasicInformation;
     public event EventHandler<LedArgs>? ReceivedSolidColor;
     public event EventHandler<List<PatternLine>>? ReceivedPattern;
+    public event EventHandler<bool>? ReceivedShowAfterDrop;
+    public event EventHandler<bool>? ReceivedAllowedWebServer;
+    public event EventHandler<WifiConfigArgs>? ReceivedWifiConfig;
+    public event EventHandler<bool>? ReceivedUsbMassStorageActive;
     public event EventHandler<int>? ReceivedDisplayBrightness;
     public event EventHandler<List<string>>? FileListUpdated;
     public event EventHandler<bool>? FileUploadFinished;
@@ -222,6 +227,31 @@ public class BusyTagDevice(string portName)
                     else if (parts[0].Equals("+DB"))
                     {
                         ReceivedDisplayBrightness?.Invoke(this, int.Parse(parts[1].Trim()));
+                    }
+                    else if (parts[0].Equals("+SAD"))
+                    {
+                        ReceivedShowAfterDrop?.Invoke(this, int.Parse(parts[1].Trim()) == 1);
+                    }
+                    else if (parts[0].Equals("+AWFS"))
+                    {
+                        ReceivedAllowedWebServer?.Invoke(this, int.Parse(parts[1].Trim()) == 1);
+                    }
+                    else if (parts[0].Equals("+WC"))
+                    {
+                        var args = parts[1].Split(',');
+                        if (args.Length >= 2)
+                        {
+                            var eventArgs = new WifiConfigArgs
+                            {
+                                SSID = args[0].Trim(),
+                                Pass = args[1].Trim()
+                            };
+                            ReceivedWifiConfig?.Invoke(this, eventArgs);
+                        }
+                    }
+                    else if (parts[0].Equals("+UMSA"))
+                    {
+                        ReceivedUsbMassStorageActive?.Invoke(this, int.Parse(parts[1].Trim()) == 1);
                     }
                     else if (parts[0].Equals("+evn"))
                     {
@@ -517,7 +547,7 @@ public class BusyTagDevice(string portName)
             if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
                 fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
             {
-                // Thread.Sleep(500);
+                Thread.Sleep(500);
                 ShowPicture(fileName);
             }
 
@@ -558,7 +588,7 @@ public class BusyTagDevice(string portName)
             if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
                 fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
             {
-                // Thread.Sleep(500);
+                Thread.Sleep(500);
                 ShowPicture(fileName);
             }
 
@@ -605,7 +635,6 @@ public class BusyTagDevice(string portName)
     public MemoryStream GetImage(string fileName)
     {
         if (_busyTagDrive == null) return new MemoryStream(); // TODO Possibly change to exception
-
 
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         var imageStream = new MemoryStream();

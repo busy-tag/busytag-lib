@@ -17,47 +17,58 @@ public class BusyTagManager
         return SerialPort.GetPortNames();
     }
 
-    public void FindBusyTagDevice()
+public void FindBusyTagDevice()
     {
         if (_isScanningForDevices) return;
         _isScanningForDevices = true;
-        var ctsForConnection = new CancellationTokenSource();
-        Task.Run(() =>
+
+        Task.Run(async () =>
         {
             string[] ports = SerialPort.GetPortNames();
             _serialDeviceList = new Dictionary<string, bool>();
-            // Display each port name to the console.
+
             foreach (var port in ports)
             {
-                // Trace.WriteLine(port);
-                _serialDeviceList[port] = false;
-                if (_serialPort is { IsOpen: true }) _serialPort.Close();
-                _serialPort = new SerialPort(port, 460800, Parity.None, 8, StopBits.One);
-                _serialPort.ReadTimeout = 500;
-                _serialPort.WriteTimeout = 500;
-                _serialPort.WriteBufferSize = 8192;
-                _serialPort.ReadBufferSize = 8192;
+                // Trace.WriteLine($"Port: {port}");
+                _serialDeviceList.Add(port, false);
+                if (_serialPort != null && _serialPort.IsOpen)
+                    _serialPort.Close();
+
+                _serialPort = new SerialPort(port, 460800, Parity.None, 8, StopBits.One)
+                {
+                    ReadTimeout = 500,
+                    WriteTimeout = 500,
+                    WriteBufferSize = 8192,
+                    ReadBufferSize = 8192
+                };
 
                 _serialPort.DataReceived += sp_DataReceived;
                 _serialPort.ErrorReceived += sp_ErrorReceived;
+
+                var cts = new CancellationTokenSource();
+                cts.CancelAfter(TimeSpan.FromSeconds(1)); // Set timeout to 1 second
+
                 try
                 {
-                    _serialPort.Open();
-                    if (_serialPort.IsOpen)
+                    var portOpened = await OpenSerialPortWithTimeoutAsync(_serialPort, cts.Token);
+                    if (portOpened && _serialPort.IsOpen)
                     {
                         SendCommand(new SerialPortCommands().GetCommand(SerialPortCommands.Commands.GetDeviceName));
-                        Thread.Sleep(100);
+                        await Task.Delay(100); // Wait for 100 ms to receive data
                         _serialPort.Close();
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    Trace.WriteLine($"Timeout opening port: {port}");
+                }
                 catch (Exception e)
                 {
-                    // Trace.WriteLine($"Error: {e.Message}");
+                    Trace.WriteLine($"Error: {e.Message}");
                 }
             }
 
             var busyTagPortList = new List<string>();
-            // ReSharper disable once ForeachCanBeConvertedToQueryUsingAnotherGetEnumerator
             foreach (var item in _serialDeviceList)
             {
                 if (item.Value)
@@ -69,9 +80,45 @@ public class BusyTagManager
             FoundSerialDevices?.Invoke(this, _serialDeviceList);
             FoundBusyTagSerialDevices?.Invoke(this, busyTagPortList);
             _isScanningForDevices = false;
-            ctsForConnection.Cancel(); // Was CancelAsync
-            return Task.CompletedTask;
-        }, ctsForConnection.Token);
+        });
+    }
+
+    private static async Task<bool> OpenSerialPortWithTimeoutAsync(SerialPort serialPort, CancellationToken token)
+    {
+        var tcs = new TaskCompletionSource<bool>();
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                serialPort.Open();
+                tcs.TrySetResult(true);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+
+        thread.Start();
+
+        using (token.Register(() => tcs.TrySetCanceled(), useSynchronizationContext: false))
+        {
+            try
+            {
+                return await tcs.Task.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // The thread will exit naturally since it checks the cancellation token
+                throw;
+            }
+            catch
+            {
+                // The thread will handle exceptions and exit naturally
+                throw;
+            }
+        }
     }
 
     private void SendCommand(string data)
@@ -100,10 +147,12 @@ public class BusyTagManager
         if (data.Contains("+DN:busytag-"))
         {
             _serialDeviceList[port.PortName] = true;
+        }else if (data.Contains("+evn:")) {
+            _serialDeviceList[port.PortName] = true;
         }
     }
 
-    private void sp_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
+    private static void sp_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
     {
         Trace.WriteLine(e.ToString());
     }

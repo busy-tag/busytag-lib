@@ -1,4 +1,4 @@
-﻿namespace BusyTag.Lib.Util;
+﻿namespace BusyTag.Lib.Util.DevEventArgs;
 
 public class LedArgs : EventArgs
 {
