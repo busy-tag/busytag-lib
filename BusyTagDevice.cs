@@ -2,6 +2,7 @@
 // ReSharper disable UnusedAutoPropertyAccessor.Global
 
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Ports;
 using System.Text.Json;
 using BusyTag.Lib.Util;
@@ -176,7 +177,7 @@ public class BusyTagDevice(string portName)
                     else if (parts[0].Equals("+FV"))
                     {
                         FirmwareVersion = parts[1].Trim();
-                        FirmwareVersionFloat = float.Parse(FirmwareVersion);
+                        FirmwareVersionFloat = float.Parse(FirmwareVersion, CultureInfo.InvariantCulture);
                     }
                     else if (parts[0].Equals("+PL"))
                     {
