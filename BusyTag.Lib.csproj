@@ -17,6 +17,7 @@
         <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
         <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
         <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'tizen'">6.5</SupportedOSPlatformVersion>
+        <Configurations>Debug;Release;Win Debug</Configurations>
     </PropertyGroup>
     <PropertyGroup Condition="$(TargetFramework.Contains('-windows')) and $(PlatformTarget)=='x64' and '$(Configuration)|$(Platform)' == 'Release|x64'">
         <Platforms>AnyCPU;x86</Platforms>
@@ -44,6 +45,9 @@
     </PropertyGroup>
     <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net8.0-android|AnyCPU'">
         <JavaMaximumHeapSize>2G</JavaMaximumHeapSize>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Win Debug|net8.0-android|AnyCPU'">
+      <JavaMaximumHeapSize>2G</JavaMaximumHeapSize>
     </PropertyGroup>
     <ItemGroup>
         <PackageReference Include="System.IO.Ports" Version="9.0.0-preview.5.24306.7" />
