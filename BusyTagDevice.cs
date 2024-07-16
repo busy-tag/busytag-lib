@@ -70,6 +70,18 @@ public class BusyTagDevice(string portName)
                 {
                     Disconnect();
                 }
+#if MACCATALYST
+                try
+                {
+                    // Send a simple command to check if the device is responsive
+                    _serialPort?.WriteLine("AT");
+                }
+                catch (Exception ex)
+                {
+                    Trace.WriteLine($"Exception in connection check: {ex.Message}");
+                    Disconnect();
+                }
+#endif
             }
         }, token);
     }
@@ -605,6 +617,7 @@ public class BusyTagDevice(string portName)
         if (_busyTagDrive != null)
         {
             var di = new DirectoryInfo(_busyTagDrive.Name);
+            Trace.WriteLine("TryToGetFileList()");
             // ReSharper disable once LoopCanBeConvertedToQuery
             foreach (var fi in di.GetFiles())
             {
