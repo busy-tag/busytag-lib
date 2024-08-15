@@ -12,7 +12,7 @@ using BusyTag.Lib.Util.DevEventArgs;
 namespace BusyTag.Lib;
 
 // All the code in this file is included in all platforms.
-public class BusyTagDevice(string portName)
+public class BusyTagDevice(string? portName)
 {
     public event EventHandler<bool>? ConnectionStateChanged;
     public event EventHandler<bool>? ReceivedDeviceBasicInformation;
@@ -30,7 +30,7 @@ public class BusyTagDevice(string portName)
     public event EventHandler<bool>? PlayPatternStatus;
     private SerialPort? _serialPort;
     private DeviceConfig _deviceConfig = new();
-    public string PortName { get; } = portName;
+    public string? PortName { get; } = portName;
 
     public bool Connected => _serialPort is { IsOpen: true };
     public string DeviceName { get; private set; } = null!;

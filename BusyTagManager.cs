@@ -17,20 +17,30 @@ public class BusyTagManager
         return SerialPort.GetPortNames();
     }
 
-public void FindBusyTagDevice()
+    public void FindBusyTagDevice()
     {
+        // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: {_isScanningForDevices}");
         if (_isScanningForDevices) return;
         _isScanningForDevices = true;
 
         Task.Run(async () =>
         {
             string[] ports = SerialPort.GetPortNames();
+            // Trace.WriteLine($"ports: {string.Join(", ", ports)}");
             _serialDeviceList = new Dictionary<string, bool>();
 
             foreach (var port in ports)
             {
+                if (!_serialDeviceList.ContainsKey(port))
+                {
+                    _serialDeviceList[port] = false;
+                }
+            }
+
+            foreach (var port in _serialDeviceList.Keys)
+            {
                 // Trace.WriteLine($"Port: {port}");
-                _serialDeviceList.Add(port, false);
+                // _serialDeviceList.Add(port, false);
                 if (_serialPort != null && _serialPort.IsOpen)
                     _serialPort.Close();
 
@@ -76,10 +86,9 @@ public void FindBusyTagDevice()
                     busyTagPortList.Add(item.Key);
                 }
             }
-
+            _isScanningForDevices = false;
             FoundSerialDevices?.Invoke(this, _serialDeviceList);
             FoundBusyTagSerialDevices?.Invoke(this, busyTagPortList);
-            _isScanningForDevices = false;
         });
     }
 
@@ -147,7 +156,9 @@ public void FindBusyTagDevice()
         if (data.Contains("+DN:busytag-"))
         {
             _serialDeviceList[port.PortName] = true;
-        }else if (data.Contains("+evn:")) {
+        }
+        else if (data.Contains("+evn:"))
+        {
             _serialDeviceList[port.PortName] = true;
         }
     }
