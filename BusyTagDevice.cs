@@ -26,6 +26,7 @@ public class BusyTagDevice(string? portName)
     public event EventHandler<List<string>>? FileListUpdated;
     public event EventHandler<bool>? FileUploadFinished;
     public event EventHandler<UploadProgressArgs>? FileUploadProgress;
+    public event EventHandler<string>? ShowingNewPicture;
     public event EventHandler<float>? FirmwareUpdateStatus;
     public event EventHandler<bool>? PlayPatternStatus;
     private SerialPort? _serialPort;
@@ -39,6 +40,7 @@ public class BusyTagDevice(string? portName)
 
     public string FirmwareVersion { get; private set; } = null!;
     public float FirmwareVersionFloat { get; private set; }
+    public string CurrentImageName { get; private set; } = null!;
 
     // public FileStruct[] PictureList { get; private set; }
     // public FileStruct[] FileList { get; private set; }
@@ -271,7 +273,12 @@ public class BusyTagDevice(string? portName)
                         var args = parts[1].Split(',');
                         if (args.Length >= 2)
                         {
-                            if (args[0].Equals("FU"))
+                            if (args[0].Equals("SP"))
+                            {
+                                CurrentImageName = args[1].Trim();
+                                ShowingNewPicture?.Invoke(this, CurrentImageName);
+                            }
+                            else if (args[0].Equals("FU"))
                             {
                                 var progress = float.Parse(args[1].Remove(args[1].Length-1));
                                 FirmwareUpdateStatus?.Invoke(this, progress);
@@ -553,6 +560,7 @@ public class BusyTagDevice(string? portName)
         var ctsForFileSending = new CancellationTokenSource();
         Task.Run(() =>
         {
+            //TODO: need to recheck if sourcePath and destPath is not the same
             var fileName = Path.GetFileName(sourcePath);
             var destPath = Path.Combine(_busyTagDrive.Name, fileName);
             File.Copy(sourcePath, destPath, true);
@@ -671,6 +679,13 @@ public class BusyTagDevice(string? portName)
         if (_busyTagDrive == null) return false;
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         return File.Exists(path);
+    }
+
+    public string GetFullFilePath(string fileName)
+    {
+        if (_busyTagDrive == null) return string.Empty;
+        var path = Path.Combine(_busyTagDrive.Name, fileName);
+        return path;
     }
 
     public void ShowPicture(string fileName)
