@@ -22,6 +22,7 @@ public class BusyTagDevice(string? portName)
     public event EventHandler<bool>? ReceivedAllowedWebServer;
     public event EventHandler<WifiConfigArgs>? ReceivedWifiConfig;
     public event EventHandler<bool>? ReceivedUsbMassStorageActive;
+    public event EventHandler<string>? ReceivedShowingPicture;
     public event EventHandler<int>? ReceivedDisplayBrightness;
     public event EventHandler<List<string>>? FileListUpdated;
     public event EventHandler<bool>? FileUploadFinished;
@@ -268,6 +269,10 @@ public class BusyTagDevice(string? portName)
                     {
                         ReceivedUsbMassStorageActive?.Invoke(this, int.Parse(parts[1].Trim()) == 1);
                     }
+                    else if (parts[0].Equals("+SP"))
+                    {
+                        ReceivedShowingPicture?.Invoke(this,parts[1].Trim());
+                    }
                     else if (parts[0].Equals("+evn"))
                     {
                         var args = parts[1].Split(',');
@@ -330,7 +335,7 @@ public class BusyTagDevice(string? portName)
         if (!_gotAllBasicInfo)
         {
             _currentCommand++;
-            if (_currentCommand > SerialPortCommands.Commands.GetUsbMassStorageActive)
+            if (_currentCommand > SerialPortCommands.Commands.GetShowingPicture)
             {
                 if (!_gotDriveInfo)
                 {
@@ -391,6 +396,11 @@ public class BusyTagDevice(string? portName)
     public void GetDisplayBrightness()
     {
         SendCommand(Commands.GetCommand(SerialPortCommands.Commands.GetDisplayBrightness));
+    }
+
+    public void GetShowingPicture()
+    {
+        SendCommand(Commands.GetCommand(SerialPortCommands.Commands.GetShowingPicture));
     }
 
     // ReSharper disable once InconsistentNaming
