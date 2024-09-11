@@ -24,7 +24,7 @@ public class BusyTagDevice(string? portName)
     public event EventHandler<bool>? ReceivedUsbMassStorageActive;
     public event EventHandler<string>? ReceivedShowingPicture;
     public event EventHandler<int>? ReceivedDisplayBrightness;
-    public event EventHandler<List<string>>? FileListUpdated;
+    public event EventHandler<List<FileStruct>>? FileListUpdated;
     public event EventHandler<bool>? FileUploadFinished;
     public event EventHandler<UploadProgressArgs>? FileUploadProgress;
     public event EventHandler<string>? ShowingNewPicture;
@@ -631,15 +631,14 @@ public class BusyTagDevice(string? portName)
 
     public void TryToGetFileList()
     {
-        var fileNames = new List<string>();
+        var fileNames = new List<FileStruct>();
         if (_busyTagDrive != null)
         {
             var di = new DirectoryInfo(_busyTagDrive.Name);
-            Trace.WriteLine("TryToGetFileList()");
             // ReSharper disable once LoopCanBeConvertedToQuery
             foreach (var fi in di.GetFiles())
             {
-                fileNames.Add(fi.Name);
+                fileNames.Add(new FileStruct(fi.Name, fi.Length));
             }
         }
 

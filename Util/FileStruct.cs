@@ -3,7 +3,7 @@
 
 namespace BusyTag.Lib.Util;
 
-public struct FileStruct
+public struct FileStruct(string name, long size)
 {
     
     public enum Type
@@ -13,9 +13,9 @@ public struct FileStruct
         Directory
     }
 
-    public string Name { get; set; }
-    public int Size { get; set; }
-    public Type FileType { get; set; }
+    public string Name { get; set; } = name;
+    public long Size { get; set; } = size;
+    public Type FileType { get; set; } = Type.File;
 
     public override string ToString()
     {
