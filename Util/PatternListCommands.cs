@@ -205,7 +205,7 @@ public class PatternListCommands
     {
         foreach (var item in PatternList)
         {
-            if (var.Equals(item.Value!.name))
+            if (var.Equals(item.Value!.Name))
             {
                 return item.Value;
             }

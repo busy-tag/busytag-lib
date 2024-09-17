@@ -654,7 +654,7 @@ public class BusyTagDevice(string? portName)
         {
             File.Delete(path);
         }
-        catch (Exception e)
+        catch (Exception)
         {
             // ignored
         }
