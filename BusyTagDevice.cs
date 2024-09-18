@@ -466,6 +466,12 @@ public class BusyTagDevice(string? portName)
     {
         // ReSharper disable once StringLiteralTypo
         SendCommand($"AT+SC={ledBits:d},{red:X2}{green:X2}{blue:X2}\r\n");
+        var eventArgs = new LedArgs
+        {
+            LedBits = ledBits,
+            Color = $"{red:X2}{green:X2}{blue:X2}"
+        };
+        ReceivedSolidColor?.Invoke(this, eventArgs);
     }
 
     public void SetNewCustomPattern(List<PatternLine> list, bool playAfterSending)
