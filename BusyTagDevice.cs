@@ -610,6 +610,11 @@ public class BusyTagDevice(string? portName)
 
             var fsOut = new FileStream(destPath, FileMode.Create);
             var fsIn = new FileStream(sourcePath, FileMode.Open);
+            if (fsOut == null || fsIn == null)
+            {
+                ctsForFileSending.Cancel();
+                return Task.CompletedTask;
+            }
             var bt = new byte[4096];
             int readByte;
             while ((readByte = fsIn.Read(bt, 0, bt.Length)) > 0)
