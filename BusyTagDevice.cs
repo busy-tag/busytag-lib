@@ -30,6 +30,7 @@ public class BusyTagDevice(string? portName)
     public event EventHandler<string>? ShowingNewPicture;
     public event EventHandler<float>? FirmwareUpdateStatus;
     public event EventHandler<bool>? PlayPatternStatus;
+    public event EventHandler<bool>? WritingInStorage;
     private SerialPort? _serialPort;
     private DeviceConfig _deviceConfig = new();
     public string? PortName { get; } = portName;
@@ -295,6 +296,7 @@ public class BusyTagDevice(string? portName)
                             }
                             else if (args[0].Equals("WIS"))
                             {
+                                WritingInStorage?.Invoke(this, args[1].Trim() != "0");
                             }
                         }
                     }
