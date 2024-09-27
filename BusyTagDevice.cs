@@ -573,7 +573,10 @@ public class BusyTagDevice(string? portName)
 
     public void SendNewFile(string sourcePath)
     {
-        if (_busyTagDrive == null) return; // TODO Possibly change to exception
+        if (_busyTagDrive == null)
+        {
+            throw new InvalidOperationException("The busy tag drive is not initialized.");
+        }
 
         var ctsForFileSending = new CancellationTokenSource();
         Task.Run(() =>
@@ -598,7 +601,11 @@ public class BusyTagDevice(string? portName)
 
     public void SendNewFileWithProgressEvents(string sourcePath)
     {
-        if (_busyTagDrive == null) return; // TODO Possibly change to exception
+        if (_busyTagDrive == null)
+        {
+            throw new InvalidOperationException("The busy tag drive is not initialized.");
+        }
+
         var ctsForFileSending = new CancellationTokenSource();
         Task.Run(() =>
         {
@@ -610,24 +617,25 @@ public class BusyTagDevice(string? portName)
                 ProgressLevel = 0.0f
             };
 
-            var fsOut = new FileStream(destPath, FileMode.Create);
-            var fsIn = new FileStream(sourcePath, FileMode.Open);
-            if (fsOut == null || fsIn == null)
+            // Check if there is enough space in the destination path
+            if (!HasEnoughSpace(destPath, new FileInfo(sourcePath).Length))
             {
-                ctsForFileSending.Cancel();
-                return Task.CompletedTask;
+                throw new IOException("Not enough space in the destination path.");
             }
+
+            using var fsOut = new FileStream(destPath, FileMode.Create);
+            using var fsIn = new FileStream(sourcePath, FileMode.Open);
+        
             var bt = new byte[4096];
             int readByte;
+
             while ((readByte = fsIn.Read(bt, 0, bt.Length)) > 0)
             {
                 fsOut.Write(bt, 0, readByte);
                 args.ProgressLevel = (float)(fsIn.Position * 100.0 / fsIn.Length);
                 FileUploadProgress?.Invoke(this, args);
             }
-            fsIn.Close();
-            fsOut.Close();
-            
+
             FileUploadFinished?.Invoke(this, true);
             if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
                 fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
@@ -636,10 +644,14 @@ public class BusyTagDevice(string? portName)
                 ShowPicture(fileName);
             }
 
-            // GetFileList();
             ctsForFileSending.Cancel();
-            return Task.CompletedTask;
         }, ctsForFileSending.Token);
+    }
+    
+    private static bool HasEnoughSpace(string destPath, long fileSize)
+    {
+        var driveInfo = new DriveInfo(Path.GetPathRoot(destPath));
+        return driveInfo.AvailableFreeSpace >= fileSize;
     }
 
     public void TryToGetFileList()
@@ -708,6 +720,12 @@ public class BusyTagDevice(string? portName)
         if (_busyTagDrive == null) return string.Empty;
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         return path;
+    }
+
+    public void SetUsbMassStorageActive(bool active)
+    {
+        // ReSharper disable once StringLiteralTypo
+        SendCommand($"AT+UMSA={(active ? 1 : 0)}\r\n");
     }
 
     public void ShowPicture(string fileName)
