@@ -296,7 +296,9 @@ public class BusyTagDevice(string? portName)
                             }
                             else if (args[0].Equals("WIS"))
                             {
-                                WritingInStorage?.Invoke(this, args[1].Trim() != "0");
+                                var isWriting = args[1].Trim() != "0";
+                                if (!isWriting) Thread.Sleep(100);
+                                WritingInStorage?.Invoke(this, isWriting);
                             }
                         }
                     }
@@ -637,12 +639,12 @@ public class BusyTagDevice(string? portName)
             }
 
             FileUploadFinished?.Invoke(this, true);
-            if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
-                fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
-            {
-                Thread.Sleep(500);
-                ShowPicture(fileName);
-            }
+            // if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
+            //     fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
+            // {
+            //     Thread.Sleep(500);
+            //     ShowPicture(fileName);
+            // }
 
             ctsForFileSending.Cancel();
         }, ctsForFileSending.Token);
