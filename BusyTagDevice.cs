@@ -575,10 +575,7 @@ public class BusyTagDevice(string? portName)
 
     public void SendNewFile(string sourcePath)
     {
-        if (_busyTagDrive == null)
-        {
-            throw new InvalidOperationException("The busy tag drive is not initialized.");
-        }
+        if (_busyTagDrive == null) return;
 
         var ctsForFileSending = new CancellationTokenSource();
         Task.Run(() =>
@@ -603,10 +600,7 @@ public class BusyTagDevice(string? portName)
 
     public void SendNewFileWithProgressEvents(string sourcePath)
     {
-        if (_busyTagDrive == null)
-        {
-            throw new InvalidOperationException("The busy tag drive is not initialized.");
-        }
+        if (_busyTagDrive == null) return;
 
         var ctsForFileSending = new CancellationTokenSource();
         Task.Run(() =>
@@ -619,10 +613,14 @@ public class BusyTagDevice(string? portName)
                 ProgressLevel = 0.0f
             };
 
-            // Check if there is enough space in the destination path
-            if (!HasEnoughSpace(destPath, new FileInfo(sourcePath).Length))
+            var counter = 0;
+            while (!HasEnoughSpace(destPath, new FileInfo(sourcePath).Length))
             {
-                throw new IOException("Not enough space in the destination path.");
+                DeleteOldestFileInDirectory(_busyTagDrive.Name);
+                counter++;
+                if (counter < 20) continue;
+                ctsForFileSending.Cancel();
+                return;
             }
 
             using var fsOut = new FileStream(destPath, FileMode.Create);
@@ -648,6 +646,28 @@ public class BusyTagDevice(string? portName)
 
             ctsForFileSending.Cancel();
         }, ctsForFileSending.Token);
+    }
+    
+    // Function to delete the oldest image file in the directory
+    private static void DeleteOldestFileInDirectory(string directoryPath)
+    {
+        var directoryInfo = new DirectoryInfo(directoryPath);
+
+        // Get all files in the directory
+        var files = directoryInfo.GetFiles()
+            .Where(f => f.Extension.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
+                        f.Extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                        f.Extension.Equals(".gif", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => f.CreationTimeUtc) // Sort by the creation time (oldest first)
+            .ToList();
+
+        if (files.Any())
+        {
+            // Delete the oldest file
+            var oldestFile = files.First();
+            oldestFile.Delete();
+            Trace.WriteLine($"Deleted oldest file: {oldestFile.Name}");
+        }
     }
     
     private static bool HasEnoughSpace(string destPath, long fileSize)
