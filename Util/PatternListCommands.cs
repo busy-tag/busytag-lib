@@ -111,7 +111,7 @@ public class PatternListCommands
             ])
         },
         {
-            PatternName.GetRedRunningLed, new PatternListItem("Red running led",
+            PatternName.GetRedRunningLed, new PatternListItem("Red running",
             [
                 new PatternLine(129, "FF0000", 10, 0),
                 new PatternLine(130, "FF0000", 10, 0),
@@ -123,7 +123,7 @@ public class PatternListCommands
             ])
         },
         {
-            PatternName.GetGreenRunningLed, new PatternListItem("Green running led",
+            PatternName.GetGreenRunningLed, new PatternListItem("Green running",
             [
                 new PatternLine(129, "00FF00", 10, 0),
                 new PatternLine(130, "00FF00", 10, 0),
@@ -135,7 +135,7 @@ public class PatternListCommands
             ])
         },
         {
-            PatternName.GetBlueRunningLed, new PatternListItem("Blue running led",
+            PatternName.GetBlueRunningLed, new PatternListItem("Blue running",
             [
                 new PatternLine(129, "0000FF", 10, 0),
                 new PatternLine(130, "0000FF", 10, 0),
@@ -147,7 +147,7 @@ public class PatternListCommands
             ])
         },
         {
-            PatternName.GetYellowRunningLed, new PatternListItem("Yellow running led",
+            PatternName.GetYellowRunningLed, new PatternListItem("Yellow running",
             [
                 new PatternLine(129, "FFFF00", 10, 0),
                 new PatternLine(130, "FFFF00", 10, 0),
@@ -159,7 +159,7 @@ public class PatternListCommands
             ])
         },
         {
-            PatternName.GetCyanRunningLed, new PatternListItem("Cyan running led",
+            PatternName.GetCyanRunningLed, new PatternListItem("Cyan running",
             [
                 new PatternLine(129, "00FFFF", 10, 0),
                 new PatternLine(130, "00FFFF", 10, 0),
@@ -171,7 +171,7 @@ public class PatternListCommands
             ])
         },
         {
-            PatternName.GetMagentaRunningLed, new PatternListItem("Magenta running led",
+            PatternName.GetMagentaRunningLed, new PatternListItem("Magenta running",
             [
                 new PatternLine(129, "FF00FF", 10, 0),
                 new PatternLine(130, "FF00FF", 10, 0),
@@ -183,7 +183,7 @@ public class PatternListCommands
             ])
         },
         {
-            PatternName.GetWhiteRunningLed, new PatternListItem("White running led",
+            PatternName.GetWhiteRunningLed, new PatternListItem("White running",
             [
                 new PatternLine(129, "FFFFFF", 10, 0),
                 new PatternLine(130, "FFFFFF", 10, 0),
