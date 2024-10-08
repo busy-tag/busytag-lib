@@ -272,7 +272,7 @@ public class BusyTagDevice(string? portName)
                     }
                     else if (parts[0].Equals("+SP"))
                     {
-                        ReceivedShowingPicture?.Invoke(this,parts[1].Trim());
+                        ReceivedShowingPicture?.Invoke(this, parts[1].Trim());
                     }
                     else if (parts[0].Equals("+evn"))
                     {
@@ -286,7 +286,7 @@ public class BusyTagDevice(string? portName)
                             }
                             else if (args[0].Equals("FU"))
                             {
-                                var progress = float.Parse(args[1].Remove(args[1].Length-1));
+                                var progress = float.Parse(args[1].Remove(args[1].Length - 1));
                                 FirmwareUpdateStatus?.Invoke(this, progress);
                             }
                             else if (args[0].Equals("PP"))
@@ -625,7 +625,13 @@ public class BusyTagDevice(string? portName)
 
             using var fsOut = new FileStream(destPath, FileMode.Create);
             using var fsIn = new FileStream(sourcePath, FileMode.Open);
-        
+
+            if (fsOut == null || fsIn == null)
+            {
+                ctsForFileSending.Cancel();
+                return;
+            }
+
             var bt = new byte[4096];
             int readByte;
 
@@ -647,7 +653,7 @@ public class BusyTagDevice(string? portName)
             ctsForFileSending.Cancel();
         }, ctsForFileSending.Token);
     }
-    
+
     // Function to delete the oldest image file in the directory
     private static void DeleteOldestFileInDirectory(string directoryPath)
     {
@@ -669,7 +675,7 @@ public class BusyTagDevice(string? portName)
             Trace.WriteLine($"Deleted oldest file: {oldestFile.Name}");
         }
     }
-    
+
     private static bool HasEnoughSpace(string destPath, long fileSize)
     {
         var driveInfo = new DriveInfo(Path.GetPathRoot(destPath));
@@ -742,6 +748,14 @@ public class BusyTagDevice(string? portName)
         if (_busyTagDrive == null) return string.Empty;
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         return path;
+    }
+
+    public FileInfo? GetFileInfo(string fileName)
+    {
+        if (_busyTagDrive == null) return null;
+        var path = Path.Combine(_busyTagDrive.Name, fileName);
+        var fileInfo = new FileInfo(path);
+        return fileInfo;
     }
 
     public void SetUsbMassStorageActive(bool active)
