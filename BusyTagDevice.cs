@@ -585,12 +585,12 @@ public class BusyTagDevice(string? portName)
             var destPath = Path.Combine(_busyTagDrive.Name, fileName);
             File.Copy(sourcePath, destPath, true);
             FileUploadFinished?.Invoke(this, true);
-            if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
-                fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
-            {
-                Thread.Sleep(500);
-                ShowPicture(fileName);
-            }
+            // if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
+            //     fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
+            // {
+            //     Thread.Sleep(500);
+            //     ShowPicture(fileName);
+            // }
 
             // GetFileList();
             ctsForFileSending.Cancel();
