@@ -545,16 +545,7 @@ public class BusyTagDevice(string? portName)
         foreach (var d in allDrives)
         {
             if (d == null) continue;
-            // Trace.WriteLine($"Drive {d.Name}");
-            // Trace.WriteLine($"  Drive type: {d.DriveType}");
             if (!d.IsReady) continue;
-            // Trace.WriteLine($"  Volume label: {d.VolumeLabel}" );
-            // Trace.WriteLine($"  File system: {d.DriveFormat}" );
-            // Trace.WriteLine($"  Available space to current user:{d.AvailableFreeSpace} bytes");
-            // Trace.WriteLine($"  Total available space:          {d.TotalFreeSpace} bytes");
-            // Trace.WriteLine($"  Total size of drive:            {d.TotalSize} bytes ");
-            // if (d.DriveType != DriveType.Removable) continue;
-
             var path = Path.Combine(d.Name, "readme.txt");
             if (!File.Exists(path)) continue;
 
@@ -563,10 +554,7 @@ public class BusyTagDevice(string? portName)
             while (sr.ReadLine() is { } s)
             {
                 if (!s.Contains(LocalHostAddress)) continue;
-
-                // Trace.WriteLine($"Found BusyTag drive: {d.Name}");
                 return d;
-                // Trace.WriteLine(s);
             }
         }
 
@@ -583,16 +571,14 @@ public class BusyTagDevice(string? portName)
             //TODO: need to recheck if sourcePath and destPath is not the same
             var fileName = Path.GetFileName(sourcePath);
             var destPath = Path.Combine(_busyTagDrive.Name, fileName);
+            if (!FreeUpStorage(new FileInfo(sourcePath).Length))
+            {
+                ctsForFileSending.Cancel();
+            }
+            
             File.Copy(sourcePath, destPath, true);
             FileUploadFinished?.Invoke(this, true);
-            // if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
-            //     fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
-            // {
-            //     Thread.Sleep(500);
-            //     ShowPicture(fileName);
-            // }
 
-            // GetFileList();
             ctsForFileSending.Cancel();
             return Task.CompletedTask;
         }, ctsForFileSending.Token);
@@ -613,12 +599,8 @@ public class BusyTagDevice(string? portName)
                 ProgressLevel = 0.0f
             };
 
-            var counter = 0;
-            while (!HasEnoughSpace(destPath, new FileInfo(sourcePath).Length))
+            if (!FreeUpStorage(new FileInfo(sourcePath).Length))
             {
-                DeleteOldestFileInDirectory(_busyTagDrive.Name);
-                counter++;
-                if (counter < 20) continue;
                 ctsForFileSending.Cancel();
                 return;
             }
@@ -643,12 +625,6 @@ public class BusyTagDevice(string? portName)
             }
 
             FileUploadFinished?.Invoke(this, true);
-            // if (fileName.EndsWith("gif", StringComparison.OrdinalIgnoreCase) ||
-            //     fileName.EndsWith("png", StringComparison.OrdinalIgnoreCase))
-            // {
-            //     Thread.Sleep(500);
-            //     ShowPicture(fileName);
-            // }
 
             ctsForFileSending.Cancel();
         }, ctsForFileSending.Token);
@@ -676,10 +652,18 @@ public class BusyTagDevice(string? portName)
         }
     }
 
-    private static bool HasEnoughSpace(string destPath, long fileSize)
+    public bool FreeUpStorage(long size)
     {
-        var driveInfo = new DriveInfo(Path.GetPathRoot(destPath));
-        return driveInfo.AvailableFreeSpace >= fileSize;
+        if (_busyTagDrive == null) return false;
+        var counter = 0;
+        while (FreeStorageSize() < size)
+        {
+            DeleteOldestFileInDirectory(_busyTagDrive.Name);
+            counter++;
+            if (counter < 20) continue;
+            return false;
+        }
+        return true;
     }
 
     public void TryToGetFileList()
@@ -711,8 +695,6 @@ public class BusyTagDevice(string? portName)
         {
             // ignored
         }
-
-        // GetFileList();
     }
 
     // ReSharper disable once InconsistentNaming
