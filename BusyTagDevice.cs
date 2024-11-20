@@ -141,7 +141,14 @@ public class BusyTagDevice(string? portName)
 
         var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
-        _serialPort.WriteLine(data);
+        try
+        {
+            _serialPort.WriteLine(data);
+        }
+        catch (Exception e)
+        {
+            Trace.WriteLine(e);
+        }
         return true;
     }
 
