@@ -680,10 +680,19 @@ public class BusyTagDevice(string? portName)
         {
             var di = new DirectoryInfo(_busyTagDrive.Name);
             // ReSharper disable once LoopCanBeConvertedToQuery
-            foreach (var fi in di.GetFiles())
+            try
             {
-                fileNames.Add(new FileStruct(fi.Name, fi.Length));
+                var files = di.GetFiles();
+                foreach (var fi in files)
+                {
+                    fileNames.Add(new FileStruct(fi.Name, fi.Length));
+                }
             }
+            catch (Exception e)
+            {
+                Trace.WriteLine(e.Message);
+            }
+
         }
 
         FileListUpdated?.Invoke(this, fileNames);
