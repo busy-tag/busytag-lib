@@ -31,7 +31,11 @@ public class BusyTagManager
 
             foreach (var port in ports)
             {
+#if MACCATALYST
+                if (!_serialDeviceList.ContainsKey(port) && port.StartsWith("/dev/tty.usbmodem", StringComparison.Ordinal))
+#else
                 if (!_serialDeviceList.ContainsKey(port))
+#endif
                 {
                     _serialDeviceList[port] = false;
                 }
