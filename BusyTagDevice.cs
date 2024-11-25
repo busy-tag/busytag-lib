@@ -62,6 +62,7 @@ public class BusyTagDevice(string? portName)
     private bool _isPlayingPattern = false;
     private bool _playPatternAfterSending = false;
     private readonly CancellationTokenSource _ctsForConnection = new();
+    private CancellationTokenSource _ctsForFileSending = new();
 
     private void ConnectionTask(int milliseconds, CancellationToken token)
     {
@@ -572,7 +573,7 @@ public class BusyTagDevice(string? portName)
     {
         if (_busyTagDrive == null) return;
 
-        var ctsForFileSending = new CancellationTokenSource();
+        _ctsForFileSending = new CancellationTokenSource();
         Task.Run(() =>
         {
             //TODO: need to recheck if sourcePath and destPath is not the same
@@ -580,22 +581,22 @@ public class BusyTagDevice(string? portName)
             var destPath = Path.Combine(_busyTagDrive.Name, fileName);
             if (!FreeUpStorage(new FileInfo(sourcePath).Length))
             {
-                ctsForFileSending.Cancel();
+                _ctsForFileSending.Cancel();
             }
             
             File.Copy(sourcePath, destPath, true);
             FileUploadFinished?.Invoke(this, true);
 
-            ctsForFileSending.Cancel();
+            _ctsForFileSending.Cancel();
             return Task.CompletedTask;
-        }, ctsForFileSending.Token);
+        }, _ctsForFileSending.Token);
     }
 
     public void SendNewFileWithProgressEvents(string sourcePath)
     {
         if (_busyTagDrive == null) return;
 
-        var ctsForFileSending = new CancellationTokenSource();
+        _ctsForFileSending = new CancellationTokenSource();
         Task.Run(() =>
         {
             var fileName = Path.GetFileName(sourcePath);
@@ -608,7 +609,7 @@ public class BusyTagDevice(string? portName)
 
             if (!FreeUpStorage(new FileInfo(sourcePath).Length))
             {
-                ctsForFileSending.Cancel();
+                _ctsForFileSending.Cancel();
                 return;
             }
 
@@ -617,24 +618,38 @@ public class BusyTagDevice(string? portName)
 
             if (fsOut == null || fsIn == null)
             {
-                ctsForFileSending.Cancel();
+                _ctsForFileSending.Cancel();
                 return;
             }
 
             var bt = new byte[4096];
             int readByte;
 
-            while ((readByte = fsIn.Read(bt, 0, bt.Length)) > 0)
+            while ((readByte = fsIn.Read(bt, 0, bt.Length)) > 0 && _ctsForFileSending.Token.IsCancellationRequested == false)
             {
-                fsOut.Write(bt, 0, readByte);
-                args.ProgressLevel = (float)(fsIn.Position * 100.0 / fsIn.Length);
-                FileUploadProgress?.Invoke(this, args);
+                try
+                {
+                    fsOut.Write(bt, 0, readByte);
+                    args.ProgressLevel = (float)(fsIn.Position * 100.0 / fsIn.Length);
+                    FileUploadProgress?.Invoke(this, args);
+                }
+                catch (Exception)
+                {
+                    DeleteFile(fileName);
+                    FileUploadFinished?.Invoke(this, false);
+                    _ctsForFileSending.Cancel();
+                }
             }
 
             FileUploadFinished?.Invoke(this, true);
 
-            ctsForFileSending.Cancel();
-        }, ctsForFileSending.Token);
+            _ctsForFileSending.Cancel();
+        }, _ctsForFileSending.Token);
+    }
+
+    public void CancelFileUpload()
+    {
+        _ctsForFileSending.Cancel();
     }
 
     // Function to delete the oldest image file in the directory
@@ -705,6 +720,7 @@ public class BusyTagDevice(string? portName)
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         try
         {
+            // Trace.WriteLine($"Deleting file: {path}");       
             File.Delete(path);
         }
         catch (Exception)
