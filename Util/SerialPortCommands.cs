@@ -24,7 +24,7 @@ public class SerialPortCommands
         GetWifiConfig,
         GetUsbMassStorageActive,
         GetShowingPicture,
-        // SetShowAfterDrop,
+        SetShowAfterDrop,
         // SetUsbMassStorageActive
     }
 
@@ -47,7 +47,7 @@ public class SerialPortCommands
         { Commands.GetWifiConfig, "AT+WC?\r\n" },
         { Commands.GetUsbMassStorageActive, "AT+UMSA?\r\n" },
         { Commands.GetShowingPicture, "AT+SP?\r\n" },
-        // { Commands.SetShowAfterDrop, "AT+SAD=0\r\n" },
+        { Commands.SetShowAfterDrop, "AT+SAD=0\r\n" },
         // { Commands.SetUsbMassStorageActive, "AT+UMSA=1\r\n"}
     };
 

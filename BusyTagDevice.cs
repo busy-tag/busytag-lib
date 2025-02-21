@@ -347,7 +347,7 @@ public class BusyTagDevice(string? portName)
         if (!_gotAllBasicInfo)
         {
             _currentCommand++;
-            if (_currentCommand > SerialPortCommands.Commands.GetShowingPicture)
+            if (_currentCommand > SerialPortCommands.Commands.SetShowAfterDrop)
             {
                 if (!_gotDriveInfo)
                 {
@@ -835,7 +835,7 @@ public class BusyTagDevice(string? portName)
         {
             Version = 3,
             Image = "def.png",
-            showAfterDrop = true,
+            showAfterDrop = false,
             allowUsbMsc = true,
             allowFileServer = false,
             dispBrightness = 100,
