@@ -150,6 +150,7 @@ public class BusyTagDevice(string? portName)
         {
             Trace.WriteLine(e);
         }
+
         return true;
     }
 
@@ -583,7 +584,7 @@ public class BusyTagDevice(string? portName)
             {
                 _ctsForFileSending.Cancel();
             }
-            
+
             File.Copy(sourcePath, destPath, true);
             FileUploadFinished?.Invoke(this, true);
 
@@ -606,6 +607,7 @@ public class BusyTagDevice(string? portName)
                 FileName = fileName,
                 ProgressLevel = 0.0f
             };
+            FileUploadProgress?.Invoke(this, args);
 
             if (!FreeUpStorage(new FileInfo(sourcePath).Length))
             {
@@ -622,10 +624,15 @@ public class BusyTagDevice(string? portName)
                 return;
             }
 
-            var bt = new byte[4096];
+#if MACCATALYST
+            var bt = new byte[8192*32];
+#else
+            var bt = new byte[8192];
+#endif
             int readByte;
 
-            while ((readByte = fsIn.Read(bt, 0, bt.Length)) > 0 && _ctsForFileSending.Token.IsCancellationRequested == false)
+            while ((readByte = fsIn.Read(bt, 0, bt.Length)) > 0 &&
+                   _ctsForFileSending.Token.IsCancellationRequested == false)
             {
                 try
                 {
@@ -685,6 +692,7 @@ public class BusyTagDevice(string? portName)
             if (counter < 20) continue;
             return false;
         }
+
         return true;
     }
 
@@ -707,7 +715,6 @@ public class BusyTagDevice(string? portName)
             {
                 Trace.WriteLine(e.Message);
             }
-
         }
 
         FileListUpdated?.Invoke(this, fileNames);
