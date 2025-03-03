@@ -51,7 +51,7 @@
       <JavaMaximumHeapSize>2G</JavaMaximumHeapSize>
     </PropertyGroup>
     <ItemGroup>
-        <PackageReference Include="System.IO.Ports" Version="9.0.0" />
-        <PackageReference Include="System.Text.Json" Version="9.0.0" />
+        <PackageReference Include="System.IO.Ports" Version="9.0.2" />
+        <PackageReference Include="System.Text.Json" Version="9.0.2" />
     </ItemGroup>
 </Project>
