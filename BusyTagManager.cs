@@ -121,13 +121,15 @@ public class BusyTagManager
             {
                 return await tcs.Task.ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException operationCanceledException)
             {
+                Trace.WriteLine($"Error: {operationCanceledException.Message}");
                 // The thread will exit naturally since it checks the cancellation token
                 throw;
             }
             catch
             {
+                Trace.WriteLine($"Error");
                 // The thread will handle exceptions and exit naturally
                 throw;
             }
@@ -151,7 +153,7 @@ public class BusyTagManager
         const int bufSize = 32;
         var buf = new byte[bufSize];
         // ReSharper disable once UnusedVariable
-        var len = _serialPort.Read(buf, 0, bufSize);
+        var len = _serialPort?.Read(buf, 0, bufSize);
         var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
         var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{data}");
