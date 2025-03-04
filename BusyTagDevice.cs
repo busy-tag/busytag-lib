@@ -61,6 +61,7 @@ public class BusyTagDevice(string? portName)
     private bool _sendingNewPattern;
     private bool _isPlayingPattern = false;
     private bool _playPatternAfterSending = false;
+    private bool _skipChecking = false;
     private readonly CancellationTokenSource _ctsForConnection = new();
     private CancellationTokenSource _ctsForFileSending = new();
 
@@ -76,12 +77,13 @@ public class BusyTagDevice(string? portName)
                     Disconnect();
                 }
 #if MACCATALYST
-                if (_gotAllBasicInfo)
+                if (_gotAllBasicInfo && !_skipChecking)
                 {
                     try
                     {
                         // Send a simple command to check if the device is responsive
-                        _serialPort?.WriteLine("AT");
+                        _serialPort?.WriteLine("AT\r\n");
+                        // SendCommand("AT\r\n");
                     }
                     catch (Exception ex)
                     {
@@ -89,6 +91,7 @@ public class BusyTagDevice(string? portName)
                         Disconnect();
                     }
                 }
+                _skipChecking = false;
 #endif
             }
         }, token);
@@ -155,6 +158,7 @@ public class BusyTagDevice(string? portName)
         try
         {
             _serialPort?.WriteLine(data);
+            _skipChecking = true;
         }
         catch (Exception e)
         {
@@ -295,6 +299,7 @@ public class BusyTagDevice(string? portName)
                     }
                     else if (parts[0].Equals("+evn"))
                     {
+                        _skipChecking = true;
                         var args = parts[1].Split(',');
                         if (args.Length >= 2)
                         {
