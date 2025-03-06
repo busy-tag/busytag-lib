@@ -363,7 +363,7 @@ public class BusyTagDevice(string? portName)
         if (!_gotAllBasicInfo)
         {
             _currentCommand++;
-            if (_currentCommand > SerialPortCommands.Commands.SetShowAfterDrop)
+            if (_currentCommand > SerialPortCommands.Commands.GetShowingPicture)
             {
                 if (!_gotDriveInfo)
                 {
