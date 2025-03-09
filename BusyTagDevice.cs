@@ -62,6 +62,7 @@ public class BusyTagDevice(string? portName)
     private bool _isPlayingPattern = false;
     private bool _playPatternAfterSending = false;
     private bool _playPatternNonStop = false;
+    private bool _skipChecking = false; 
     private readonly CancellationTokenSource _ctsForConnection = new();
     private CancellationTokenSource _ctsForFileSending = new();
 
@@ -77,16 +78,21 @@ public class BusyTagDevice(string? portName)
                     Disconnect();
                 }
 #if MACCATALYST
+                if (_gotAllBasicInfo && !_skipChecking)
+                {
                 try
                 {
                     // Send a simple command to check if the device is responsive
-                    _serialPort?.WriteLine("AT");
+                        _serialPort?.WriteLine("AT\r\n");
+                        // SendCommand("AT\r\n");
                 }
                 catch (Exception ex)
                 {
                     Trace.WriteLine($"Exception in connection check: {ex.Message}");
                     Disconnect();
                 }
+                }
+                _skipChecking = false;
 #endif
             }
         }, token);
@@ -101,6 +107,8 @@ public class BusyTagDevice(string? portName)
         _serialPort.DataReceived += sp_DataReceived;
         _serialPort.ErrorReceived += sp_ErrorReceived;
 
+        try
+        {
         _serialPort.Open();
         ConnectionStateChanged?.Invoke(this, Connected);
         if (!Connected)
@@ -112,7 +120,12 @@ public class BusyTagDevice(string? portName)
         _gotAllBasicInfo = false;
         _currentCommand = SerialPortCommands.Commands.GetDeviceName;
         SendCommand(Commands.GetCommand(_currentCommand));
-        ConnectionTask(1000, _ctsForConnection.Token);
+            ConnectionTask(3000, _ctsForConnection.Token);
+        }
+        catch (Exception e)
+        {
+            Trace.WriteLine($"Error: {e.Message}");
+        }
     }
 
     public void Disconnect()
@@ -145,7 +158,8 @@ public class BusyTagDevice(string? portName)
         Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
         try
         {
-            _serialPort.WriteLine(data);
+            _serialPort?.WriteLine(data);
+            _skipChecking = true;
         }
         catch (Exception e)
         {
@@ -164,7 +178,7 @@ public class BusyTagDevice(string? portName)
         var buf = new byte[bufSize];
         // string data = _serialPort.ReadLine();
         // ReSharper disable once UnusedVariable
-        var len = _serialPort.Read(buf, 0, bufSize);
+        var len = _serialPort?.Read(buf, 0, bufSize);
         // long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
         // Trace.WriteLine($"timestamp: {timestamp}, len:{len}");
         var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
@@ -286,6 +300,7 @@ public class BusyTagDevice(string? portName)
                     }
                     else if (parts[0].Equals("+evn"))
                     {
+                        _skipChecking = true;
                         var args = parts[1].Split(',');
                         if (args.Length >= 2)
                         {
@@ -349,7 +364,7 @@ public class BusyTagDevice(string? portName)
         if (!_gotAllBasicInfo)
         {
             _currentCommand++;
-            if (_currentCommand > SerialPortCommands.Commands.SetShowAfterDrop)
+            if (_currentCommand > SerialPortCommands.Commands.GetShowingPicture)
             {
                 if (!_gotDriveInfo)
                 {
@@ -552,9 +567,11 @@ public class BusyTagDevice(string? portName)
 
     private DriveInfo? FindBusyTagDrive()
     {
+        if (LocalHostAddress == null) return null;
         var allDrives = DriveInfo.GetDrives();
         foreach (var d in allDrives)
         {
+            // Trace.WriteLine($"drive:{d.Name}");
             if (d == null) continue;
             if (!d.IsReady) continue;
             var path = Path.Combine(d.Name, "readme.txt");
@@ -574,6 +591,7 @@ public class BusyTagDevice(string? portName)
 
     public void SendNewFile(string sourcePath)
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return;
 
         _ctsForFileSending = new CancellationTokenSource();
@@ -597,6 +615,7 @@ public class BusyTagDevice(string? portName)
 
     public void SendNewFileWithProgressEvents(string sourcePath)
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return;
 
         _ctsForFileSending = new CancellationTokenSource();
@@ -685,6 +704,7 @@ public class BusyTagDevice(string? portName)
 
     public bool FreeUpStorage(long size)
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return false;
         var counter = 0;
         while (FreeStorageSize() < size)
@@ -700,6 +720,7 @@ public class BusyTagDevice(string? portName)
 
     public void TryToGetFileList()
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         var fileNames = new List<FileStruct>();
         if (_busyTagDrive != null)
         {
@@ -724,6 +745,7 @@ public class BusyTagDevice(string? portName)
 
     public void DeleteFile(string fileName)
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return; // TODO Possibly change to exception
 
         var path = Path.Combine(_busyTagDrive.Name, fileName);
@@ -741,6 +763,7 @@ public class BusyTagDevice(string? portName)
     // ReSharper disable once InconsistentNaming
     public MemoryStream GetImage(string fileName)
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return new MemoryStream(); // TODO Possibly change to exception
 
         var path = Path.Combine(_busyTagDrive.Name, fileName);
@@ -761,6 +784,7 @@ public class BusyTagDevice(string? portName)
 
     public bool FileExists(string fileName)
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return false;
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         return File.Exists(path);
@@ -768,6 +792,7 @@ public class BusyTagDevice(string? portName)
 
     public string GetFullFilePath(string fileName)
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return string.Empty;
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         return path;
@@ -775,6 +800,7 @@ public class BusyTagDevice(string? portName)
 
     public FileInfo? GetFileInfo(string fileName)
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return null;
         var path = Path.Combine(_busyTagDrive.Name, fileName);
         var fileInfo = new FileInfo(path);
@@ -814,6 +840,7 @@ public class BusyTagDevice(string? portName)
     // ReSharper disable once InconsistentNaming
     private void GetConfigJsonFile()
     {
+        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return;
         var path = Path.Combine(_busyTagDrive.Name, "config.json");
 
