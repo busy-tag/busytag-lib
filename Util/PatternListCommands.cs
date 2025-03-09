@@ -47,7 +47,7 @@ public class PatternListCommands
             ])
         },
         {
-            PatternName.GetPolice1, new PatternListItem("Police1",
+            PatternName.GetPolice1, new PatternListItem("Police 1",
             [
                 new PatternLine(120, "FF0000", 5, 50),
                 new PatternLine(120, "000000", 5, 50),
@@ -56,7 +56,7 @@ public class PatternListCommands
             ])
         },
         {
-            PatternName.GetPolice2, new PatternListItem("Police2",
+            PatternName.GetPolice2, new PatternListItem("Police 2",
             [
                 new PatternLine(120, "FF0000", 3, 20),
                 new PatternLine(120, "000000", 3, 20),
