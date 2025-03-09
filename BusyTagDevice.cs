@@ -61,6 +61,7 @@ public class BusyTagDevice(string? portName)
     private bool _sendingNewPattern;
     private bool _isPlayingPattern = false;
     private bool _playPatternAfterSending = false;
+    private bool _playPatternNonStop = false;
     private readonly CancellationTokenSource _ctsForConnection = new();
     private CancellationTokenSource _ctsForFileSending = new();
 
@@ -325,7 +326,7 @@ public class BusyTagDevice(string? portName)
                         _receivingPattern = false;
                         if (_playPatternAfterSending)
                         {
-                            PlayPattern(true, 5);
+                            PlayPattern(true, (_playPatternNonStop ? 255 : 5));
                         }
                     }
                 }
@@ -339,7 +340,7 @@ public class BusyTagDevice(string? portName)
                     _sendingNewPattern = false;
                     if (_playPatternAfterSending)
                     {
-                        PlayPattern(true, 5);
+                        PlayPattern(true, (_playPatternNonStop ? 255 : 5));
                     }
                 }
             }
@@ -487,7 +488,7 @@ public class BusyTagDevice(string? portName)
         ReceivedSolidColor?.Invoke(this, eventArgs);
     }
 
-    public void SetNewCustomPattern(List<PatternLine> list, bool playAfterSending)
+    public void SetNewCustomPattern(List<PatternLine> list, bool playAfterSending, bool playPatternNonStop)
     {
         if (_isPlayingPattern)
         {
@@ -497,6 +498,7 @@ public class BusyTagDevice(string? portName)
         }
 
         _playPatternAfterSending = playAfterSending;
+        _playPatternNonStop = playPatternNonStop;
         _patternList.Clear();
         foreach (var item in list)
         {
