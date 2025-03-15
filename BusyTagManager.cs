@@ -91,9 +91,38 @@ public class BusyTagManager
                 }
             }
             _isScanningForDevices = false;
-            FoundSerialDevices?.Invoke(this, _serialDeviceList);
-            FoundBusyTagSerialDevices?.Invoke(this, busyTagPortList);
+
+            SafeInvokeFoundSerialDevices(_serialDeviceList);
+            SafeInvokeFoundBusyTagSerialDevices(busyTagPortList);
         });
+    }
+
+    private void SafeInvokeFoundSerialDevices(Dictionary<string, bool> devices)
+    {
+        if (FoundSerialDevices == null) return;
+
+        try
+        {
+            FoundSerialDevices.Invoke(this, devices);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"Error in FoundSerialDevices event handler: {ex.Message}");
+        }
+    }
+
+    private void SafeInvokeFoundBusyTagSerialDevices(List<string> devices)
+    {
+        if (FoundBusyTagSerialDevices == null) return;
+
+        try
+        {
+            FoundBusyTagSerialDevices.Invoke(this, devices);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"Error in FoundBusyTagSerialDevices event handler: {ex.Message}");
+        }
     }
 
     private static async Task<bool> OpenSerialPortWithTimeoutAsync(SerialPort serialPort, CancellationToken token)
