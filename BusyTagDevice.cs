@@ -347,7 +347,8 @@ public class BusyTagDevice(string? portName)
                 }
                 else if (line.Equals(">") && _sendingNewPattern)
                 {
-                    foreach (var item in _patternList)
+                    var patternListCopy = new List<PatternLine>(_patternList);
+                    foreach (var item in patternListCopy)
                     {
                         SendCommand($"+CP:{item.ledBits},{item.color},{item.speed},{item.delay}\r\n");
                     }
