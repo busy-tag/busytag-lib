@@ -14,6 +14,7 @@ namespace BusyTag.Lib;
 // All the code in this file is included in all platforms.
 public class BusyTagDevice(string? portName)
 {
+    private const int MaxFilenameLength = 40; // TODO: Need to recheck this
     public event EventHandler<bool>? ConnectionStateChanged;
     public event EventHandler<bool>? ReceivedDeviceBasicInformation;
     public event EventHandler<LedArgs>? ReceivedSolidColor;
@@ -62,7 +63,7 @@ public class BusyTagDevice(string? portName)
     private bool _isPlayingPattern = false;
     private bool _playPatternAfterSending = false;
     private bool _playPatternNonStop = false;
-    private bool _skipChecking = false; 
+    private bool _skipChecking = false;
     private readonly CancellationTokenSource _ctsForConnection = new();
     private CancellationTokenSource _ctsForFileSending = new();
 
@@ -80,18 +81,19 @@ public class BusyTagDevice(string? portName)
 #if MACCATALYST
                 if (_gotAllBasicInfo && !_skipChecking)
                 {
-                try
-                {
-                    // Send a simple command to check if the device is responsive
+                    try
+                    {
+                        // Send a simple command to check if the device is responsive
                         _serialPort?.WriteLine("AT\r\n");
                         // SendCommand("AT\r\n");
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace.WriteLine($"Exception in connection check: {ex.Message}");
+                        Disconnect();
+                    }
                 }
-                catch (Exception ex)
-                {
-                    Trace.WriteLine($"Exception in connection check: {ex.Message}");
-                    Disconnect();
-                }
-                }
+
                 _skipChecking = false;
 #endif
             }
@@ -109,17 +111,17 @@ public class BusyTagDevice(string? portName)
 
         try
         {
-        _serialPort.Open();
-        ConnectionStateChanged?.Invoke(this, Connected);
-        if (!Connected)
-        {
-            Disconnect();
-            return;
-        }
+            _serialPort.Open();
+            ConnectionStateChanged?.Invoke(this, Connected);
+            if (!Connected)
+            {
+                Disconnect();
+                return;
+            }
 
-        _gotAllBasicInfo = false;
-        _currentCommand = SerialPortCommands.Commands.GetDeviceName;
-        SendCommand(Commands.GetCommand(_currentCommand));
+            _gotAllBasicInfo = false;
+            _currentCommand = SerialPortCommands.Commands.GetDeviceName;
+            SendCommand(Commands.GetCommand(_currentCommand));
             ConnectionTask(3000, _ctsForConnection.Token);
         }
         catch (Exception e)
@@ -130,17 +132,17 @@ public class BusyTagDevice(string? portName)
 
     public void Disconnect()
     {
-        if (_serialPort == null) return; // TODO Possibly change to exception
-
-        // if (Connected)
-        // {
-        _serialPort.Close();
-        _serialPort.Dispose();
-        // }
-
-        ConnectionStateChanged?.Invoke(this, false);
-        _ctsForConnection.Cancel();
-        _serialPort = null;
+        try
+        {
+            _serialPort?.Close();
+            _serialPort?.Dispose(); // this is still necessary?
+        }
+        finally
+        {
+            ConnectionStateChanged?.Invoke(this, false);
+            _ctsForConnection.Cancel();
+            _serialPort = null;
+        }
     }
 
     public SerialPort? SerialPort()
@@ -618,11 +620,24 @@ public class BusyTagDevice(string? portName)
     {
         if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
         if (_busyTagDrive == null) return;
+        
+        // Validate filename length before proceeding
+        var fileName = Path.GetFileName(sourcePath);
+        if (fileName.Length > MaxFilenameLength)
+        {
+            FileUploadProgress?.Invoke(this, new UploadProgressArgs 
+            { 
+                FileName = fileName,
+                ProgressLevel = 0,
+                // ErrorMessage = "Filename exceeds 40 character limit"
+            });
+            FileUploadFinished?.Invoke(this, false);
+            return;
+        }
 
         _ctsForFileSending = new CancellationTokenSource();
         Task.Run(() =>
         {
-            var fileName = Path.GetFileName(sourcePath);
             var destPath = Path.Combine(_busyTagDrive.Name, fileName);
             var args = new UploadProgressArgs
             {
@@ -647,18 +662,18 @@ public class BusyTagDevice(string? portName)
             }
 
 #if MACCATALYST
-            var bt = new byte[8192*32];
+            var buffer = new byte[8192 * 32];
 #else
-            var bt = new byte[8192];
+            var buffer = new byte[8192];
 #endif
             int readByte;
 
-            while ((readByte = fsIn.Read(bt, 0, bt.Length)) > 0 &&
+            while ((readByte = fsIn.Read(buffer, 0, buffer.Length)) > 0 &&
                    _ctsForFileSending.Token.IsCancellationRequested == false)
             {
                 try
                 {
-                    fsOut.Write(bt, 0, readByte);
+                    fsOut.Write(buffer, 0, readByte);
                     args.ProgressLevel = (float)(fsIn.Position * 100.0 / fsIn.Length);
                     FileUploadProgress?.Invoke(this, args);
                 }
@@ -694,13 +709,11 @@ public class BusyTagDevice(string? portName)
             .OrderBy(f => f.CreationTimeUtc) // Sort by the creation time (oldest first)
             .ToList();
 
-        if (files.Any())
-        {
-            // Delete the oldest file
-            var oldestFile = files.First();
-            oldestFile.Delete();
-            Trace.WriteLine($"Deleted oldest file: {oldestFile.Name}");
-        }
+        if (!files.Any()) return;
+        // Delete the oldest file
+        var oldestFile = files.First();
+        oldestFile.Delete();
+        Trace.WriteLine($"Deleted oldest file: {oldestFile.Name}");
     }
 
     public bool FreeUpStorage(long size)
