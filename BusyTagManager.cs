@@ -32,7 +32,8 @@ public class BusyTagManager
             foreach (var port in ports)
             {
 #if MACCATALYST
-                if (!_serialDeviceList.ContainsKey(port) && port.StartsWith("/dev/tty.usbmodem", StringComparison.Ordinal))
+                if (!_serialDeviceList.ContainsKey(port) &&
+                    port.StartsWith("/dev/tty.usbmodem", StringComparison.Ordinal))
 #else
                 if (!_serialDeviceList.ContainsKey(port))
 #endif
@@ -68,7 +69,7 @@ public class BusyTagManager
                     if (portOpened && _serialPort.IsOpen)
                     {
                         SendCommand(new SerialPortCommands().GetCommand(SerialPortCommands.Commands.GetDeviceName));
-                        await Task.Delay(100); // Wait for 100 ms to receive data
+                        await Task.Delay(150, cts.Token); // Wait for 150 ms to receive data
                         _serialPort.Close();
                     }
                 }
@@ -90,6 +91,7 @@ public class BusyTagManager
                     busyTagPortList.Add(item.Key);
                 }
             }
+
             _isScanningForDevices = false;
 
             SafeInvokeFoundSerialDevices(_serialDeviceList);
@@ -176,25 +178,29 @@ public class BusyTagManager
 
     private void sp_DataReceived(object sender, SerialDataReceivedEventArgs e)
     {
-        if (_serialPort == null) return; // TODO Possibly change to exception
+        if (_serialPort == null || !_serialPort.IsOpen) return;
 
-        var port = (SerialPort)sender;
-        const int bufSize = 32;
-        var buf = new byte[bufSize];
-        // ReSharper disable once UnusedVariable
-        var len = _serialPort?.Read(buf, 0, bufSize);
-        var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
-        var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-        Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{data}");
-
-        // ReSharper disable once StringLiteralTypo
-        if (data.Contains("+DN:busytag-"))
+        try
         {
-            _serialDeviceList[port.PortName] = true;
+            const int bufSize = 512;
+            var buf = new byte[bufSize];
+            var len = _serialPort.Read(buf, 0, bufSize);
+            var data = System.Text.Encoding.UTF8.GetString(buf, 0, len);
+            var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{data}");
+
+            if (data.Contains("+DN:busytag-") || data.Contains("+evn:"))
+            {
+                _serialDeviceList[_serialPort.PortName] = true;
+            }
         }
-        else if (data.Contains("+evn:"))
+        catch (InvalidOperationException ex) when (ex.Message.Contains("port is closed"))
         {
-            _serialDeviceList[port.PortName] = true;
+            Trace.WriteLine("Port closed during read operation");
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"Error in DataReceived: {ex.Message}");
         }
     }
 
