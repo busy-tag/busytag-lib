@@ -146,7 +146,7 @@ public class BusyTagManager
 
         thread.Start();
 
-        using (token.Register(() => tcs.TrySetCanceled(), useSynchronizationContext: false))
+        await using (token.Register(() => tcs.TrySetCanceled(), useSynchronizationContext: false))
         {
             try
             {
@@ -178,7 +178,7 @@ public class BusyTagManager
 
     private void sp_DataReceived(object sender, SerialDataReceivedEventArgs e)
     {
-        if (_serialPort == null || !_serialPort.IsOpen) return;
+        if (_serialPort is not { IsOpen: true }) return;
 
         try
         {
