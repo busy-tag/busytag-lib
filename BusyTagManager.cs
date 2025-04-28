@@ -67,6 +67,8 @@ public class BusyTagManager
                 {
                     var portOpened = await OpenSerialPortWithTimeoutAsync(_serialPort, cts.Token);
                     if (portOpened && _serialPort.IsOpen)
+                    // _serialPort.Open();
+                    // if (_serialPort.IsOpen)
                     {
                         SendCommand(new SerialPortCommands().GetCommand(SerialPortCommands.Commands.GetDeviceName));
                         await Task.Delay(150, cts.Token); // Wait for 150 ms to receive data
