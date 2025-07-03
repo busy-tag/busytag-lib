@@ -5,11 +5,11 @@ namespace BusyTag.Lib.Util;
 public class PatternLine(int ledBits, string color, int speed, int delay)
 {
     [JsonPropertyName("led_bits")]
-    public int ledBits { get; set; } = ledBits;
+    public int LedBits { get; set; } = ledBits;
     [JsonPropertyName("color")]
-    public string color{ get; set; } = color;
+    public string Color{ get; set; } = color;
     [JsonPropertyName("speed")]
-    public int speed{ get; set; } = speed;
+    public int Speed{ get; set; } = speed;
     [JsonPropertyName("delay")]
-    public int delay{ get; set; } = delay;
+    public int Delay{ get; set; } = delay;
 }

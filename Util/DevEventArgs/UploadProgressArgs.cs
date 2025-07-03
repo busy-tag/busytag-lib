@@ -2,6 +2,6 @@
 
 public class UploadProgressArgs: EventArgs
 {
-    public string FileName = null!;
-    public float ProgressLevel;
+    public string FileName { get; set; } = string.Empty;
+    public float ProgressLevel  { get; set; }
 }

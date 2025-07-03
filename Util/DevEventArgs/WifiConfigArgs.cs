@@ -2,6 +2,6 @@
 
 public class WifiConfigArgs: EventArgs
 {
-    public string SSID = null!;
-    public string Pass = null!;
+    public string Ssid { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
 }

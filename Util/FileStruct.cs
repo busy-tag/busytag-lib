@@ -1,7 +1,4 @@
-﻿// ReSharper disable InconsistentNaming
-// ReSharper disable UnusedAutoPropertyAccessor.Global
-
-namespace BusyTag.Lib.Util;
+﻿namespace BusyTag.Lib.Util;
 
 public struct FileStruct(string name, long size)
 {

@@ -2,6 +2,6 @@
 
 public class LedArgs : EventArgs
 {
-    public int LedBits;
-    public string Color = null!;
+    public int LedBits { get; set; }
+    public string Color { get; set; } = string.Empty;
 }
