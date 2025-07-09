@@ -41,8 +41,6 @@ public class BusyTagDevice(string? portName)
     public float FirmwareVersionFloat { get; private set; }
 
     public string CurrentImageName { get; private set; } = string.Empty;
-
-    // public string CurrentImagePath { get; private set; } = string.Empty;
     private string CachedFileDirPath { get; set; } = string.Empty;
     private List<FileStruct> FileList { get; set; } = [];
     public string LocalHostAddress { get; private set; } = string.Empty;
@@ -52,8 +50,9 @@ public class BusyTagDevice(string? portName)
     public long TotalStorageSize { get; private set; }
     private DriveInfo? _busyTagDrive;
     private readonly List<PatternLine> _patternList = [];
-    private bool _asyncCommand;
+    private bool _asyncCommandActive;
     private bool _isPlayingPattern = false;
+    private bool _sendingFile =  false;
     private bool _skipChecking = false;
     private readonly CancellationTokenSource _ctsForConnection = new();
     private CancellationTokenSource _ctsForFileSending = new();
@@ -118,16 +117,17 @@ public class BusyTagDevice(string? portName)
             CachedFileDirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "BusyTagImages");
             if (!Directory.Exists(CachedFileDirPath)) Directory.CreateDirectory(CachedFileDirPath);
-            CachedFileDirPath = Path.Combine(CachedFileDirPath, DeviceName);
-            if (!Directory.Exists(CachedFileDirPath)) Directory.CreateDirectory(CachedFileDirPath);
+            // CachedFileDirPath = Path.Combine(CachedFileDirPath, DeviceName);
+            // if (!Directory.Exists(CachedFileDirPath)) Directory.CreateDirectory(CachedFileDirPath);
             await GetManufactureNameAsync();
             await GetDeviceIdAsync();
             await GetFirmwareVersionAsync();
             await GetCurrentImageNameAsync();
             await GetTotalStorageSizeAsync();
             await GetFreeStorageSizeAsync();
+            await GetSolidColorAsync();
 
-            if (FirmwareVersionFloat > 2.0)
+            if (FirmwareVersionFloat < 2.0)
                 await SetUsbMassStorageActiveAsync(true);
             if (FirmwareVersionFloat > 0.7)
                 await SetAllowedAutoStorageScanAsync(false);
@@ -136,23 +136,6 @@ public class BusyTagDevice(string? portName)
 
             await GetFileListAsync();
 
-            // foreach (var item in FileList)
-            // {
-            //     if (!FileExistsInCache(item.Name))
-            //     {
-            //         await GetFileAsync(item.Name);
-            //     }
-            //     else
-            //     {
-            //         var filePath = Path.Combine(CachedFileDirPath, item.Name);
-            //         if (item.Size != new FileInfo(filePath).Length)
-            //         {
-            //             await GetFileAsync(item.Name);
-            //         }
-            //     }
-            //     
-            // }
-
             // Only sync the current image immediately for faster connection
             // if (!string.IsNullOrEmpty(CurrentImageName) && !FileExistsInCache(CurrentImageName))
             // {
@@ -160,7 +143,7 @@ public class BusyTagDevice(string? portName)
             // }
 
             ReceivedDeviceBasicInformation?.Invoke(this, true);
-            // ConnectionTask(3000, _ctsForConnection.Token);
+            ConnectionTask(3000, _ctsForConnection.Token);
         }
         catch (Exception e)
         {
@@ -232,6 +215,7 @@ public class BusyTagDevice(string? portName)
     private Task<string> SendCommandAsync(string command, int timeoutMs = 50, bool waitForFirstResponse = true,
         bool discardInBuffer = true)
     {
+        if(_asyncCommandActive) return Task.FromResult<string>(null);
         if (!IsConnected)
         {
             Disconnect();
@@ -249,7 +233,7 @@ public class BusyTagDevice(string? portName)
                 {
                     if (discardInBuffer) _serialPort?.DiscardInBuffer();
                     if (!string.IsNullOrEmpty(command)) _serialPort?.WriteLine(command);
-                    _asyncCommand = true;
+                    _asyncCommandActive = true;
 
                     timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                     Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{command}");
@@ -271,7 +255,7 @@ public class BusyTagDevice(string? portName)
                             {
                                 timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                                 Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{responseStr.Trim()}");
-                                _asyncCommand = false;
+                                _asyncCommandActive = false;
                                 return Task.FromResult(responseStr.Trim());
                             }
 
@@ -285,7 +269,7 @@ public class BusyTagDevice(string? portName)
                 }
                 catch (Exception ex)
                 {
-                    _asyncCommand = false;
+                    _asyncCommandActive = false;
                     Console.WriteLine($"[ERROR] Command '{command}' failed: {ex.Message}");
                     throw new InvalidOperationException($"Command failed: {ex.Message}", ex);
                 }
@@ -293,12 +277,12 @@ public class BusyTagDevice(string? portName)
 
             timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{result.Trim()}");
-            _asyncCommand = false;
+            _asyncCommandActive = false;
             return Task.FromResult(result);
         }
         finally
         {
-            _asyncCommand = false;
+            _asyncCommandActive = false;
         }
     }
 
@@ -319,7 +303,7 @@ public class BusyTagDevice(string? portName)
             {
                 try
                 {
-                    _asyncCommand = true;
+                    _asyncCommandActive = true;
                     var isReadOnlyOperation = data == null || data.Length == 0;
 
                     if (!isReadOnlyOperation)
@@ -367,7 +351,7 @@ public class BusyTagDevice(string? portName)
                 }
             }
 
-            _asyncCommand = false;
+            _asyncCommandActive = false;
             return result;
         }
         finally
@@ -386,7 +370,7 @@ public class BusyTagDevice(string? portName)
         const int bufSize = 1024 * 8;
         var buf = new byte[bufSize];
         Trace.WriteLine($"sp_DataReceived {_serialPort.BytesToRead} bytes");
-        if (_asyncCommand)
+        if (_asyncCommandActive)
         {
             return;
         }
@@ -625,12 +609,11 @@ public class BusyTagDevice(string? portName)
                 }
                 else if (line.Contains("ERROR"))
                 {
-                    // if (_sendingFile)
-                    // {
-                    //     _sendingFile = false;
-                    //     FileUploadFinished?.Invoke(this, false);
-                    //     GetFileList();
-                    // }
+                    if (_sendingFile)
+                    {
+                        _sendingFile = false;
+                        CancelFileUpload(false);
+                    }
                 }
             }
         }
@@ -745,10 +728,12 @@ public class BusyTagDevice(string? portName)
         return FileList;
     }
 
-    public async Task<DeviceConfig.SolidColor> GetSolidColorAsync()
+    public async Task<LedArgs> GetSolidColorAsync()
     {
         var response = await SendCommandAsync("AT+SC?");
-        return ParseSolidColor(response);
+        var solidColor = ParseSolidColor(response);
+        ReceivedSolidColor?.Invoke(this, solidColor);
+        return solidColor;
     }
 
     public async Task<bool> PlayPatternAsync(bool allow, int repeatCount)
@@ -831,16 +816,6 @@ public class BusyTagDevice(string? portName)
         var response = await SendCommandAsync("AT+AFSS");
         return response.Contains("OK");
     }
-
-    // public long FreeStorageSize()
-    // {
-    //     return _busyTagDrive?.TotalFreeSpace ?? 0;
-    // }
-    //
-    // public long TotalStorageSize()
-    // {
-    //     return _busyTagDrive?.TotalSize ?? 0;
-    // }
 
     public void GetSolidColor()
     {
@@ -996,6 +971,7 @@ public class BusyTagDevice(string? portName)
         var destFilePath = Path.Combine(CachedFileDirPath, fileName);
         if(!FileExistsInCache(fileName))
             File.Copy(sourcePath, destFilePath, true);
+        _sendingFile = true;
         
         var args = new UploadProgressArgs
         {
@@ -1015,6 +991,7 @@ public class BusyTagDevice(string? portName)
             await Task.Run(async () =>
             {
                 await SendFileViaSerial(sourcePath); 
+                _sendingFile = false;
                 await GetFileListAsync();
             });
             return;
@@ -1069,7 +1046,8 @@ public class BusyTagDevice(string? portName)
 
             CancelFileUpload();
         }, _ctsForFileSending.Token);
-
+        
+        _sendingFile = false;
         await GetFileListAsync();
     }
 
@@ -1201,8 +1179,9 @@ public class BusyTagDevice(string? portName)
         if (FirmwareVersionFloat >= 2.0)
         {
             var counter = 0;
-            while (await GetFreeStorageSizeAsync() < size)
+            while (FreeStorageSize < size)
             {
+                await GetFreeStorageSizeAsync();
                 if (await AutoDeleteFile() != true) return false;
                 counter++;
                 if (counter < 20) continue;
@@ -1214,8 +1193,9 @@ public class BusyTagDevice(string? portName)
             if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
             if (_busyTagDrive == null) return false;
             var counter = 0;
-            while (await GetFreeStorageSizeAsync() < size)
+            while (FreeStorageSize < size)
             {
+                await GetFreeStorageSizeAsync();
                 DeleteOldestFileInDirectory(_busyTagDrive.Name);
                 counter++;
                 if (counter < 20) continue;
@@ -1540,17 +1520,21 @@ public class BusyTagDevice(string? portName)
         return files;
     }
 
-    private static DeviceConfig.SolidColor ParseSolidColor(string response)
+    private static LedArgs ParseSolidColor(string response)
     {
         var value = response.Contains("+SC:") ? response.Split(':').Last() : "";
         var parts = value.Split(',');
         if (parts.Length >= 2 && int.TryParse(parts[0], out var ledBits))
         {
             var colorHex = parts[1];
-            return new DeviceConfig.SolidColor(ledBits, colorHex);
+            return new LedArgs()
+            {
+                LedBits = ledBits,
+                Color = colorHex
+            };
         }
 
-        return new DeviceConfig.SolidColor(127, "990000");
+        return new LedArgs(){LedBits = 127, Color = "990000"};
     }
 
     private static WiFiConfig ParseWiFiConfig(string response)
