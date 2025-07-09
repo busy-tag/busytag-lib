@@ -126,13 +126,15 @@ public class BusyTagDevice(string? portName)
             await GetTotalStorageSizeAsync();
             await GetFreeStorageSizeAsync();
             await GetSolidColorAsync();
+            await GetDisplayBrightnessAsync();
 
             if (FirmwareVersionFloat < 2.0)
+            {
                 await SetUsbMassStorageActiveAsync(true);
+                _busyTagDrive = FindBusyTagDrive();
+            }
             if (FirmwareVersionFloat > 0.7)
                 await SetAllowedAutoStorageScanAsync(false);
-            if (FirmwareVersionFloat < 2.0)
-                _busyTagDrive = FindBusyTagDrive();
 
             await GetFileListAsync();
 
@@ -212,7 +214,7 @@ public class BusyTagDevice(string? portName)
     //     return true;
     // }
 
-    private Task<string> SendCommandAsync(string command, int timeoutMs = 50, bool waitForFirstResponse = true,
+    private Task<string> SendCommandAsync(string command, int timeoutMs = 100, bool waitForFirstResponse = true,
         bool discardInBuffer = true)
     {
         if(_asyncCommandActive) return Task.FromResult<string>(null);
@@ -270,7 +272,7 @@ public class BusyTagDevice(string? portName)
                 catch (Exception ex)
                 {
                     _asyncCommandActive = false;
-                    Console.WriteLine($"[ERROR] Command '{command}' failed: {ex.Message}");
+                    Trace.WriteLine($"[ERROR] Command '{command}' failed: {ex.Message}");
                     throw new InvalidOperationException($"Command failed: {ex.Message}", ex);
                 }
             }
@@ -369,7 +371,8 @@ public class BusyTagDevice(string? portName)
 
         const int bufSize = 1024 * 8;
         var buf = new byte[bufSize];
-        Trace.WriteLine($"sp_DataReceived {_serialPort.BytesToRead} bytes");
+        long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]sp_DataReceived {_serialPort.BytesToRead} bytes");
         if (_asyncCommandActive)
         {
             return;
@@ -782,7 +785,7 @@ public class BusyTagDevice(string? portName)
 
     public async Task<bool> ShowPictureAsync(string fileName)
     {
-        var response = await SendCommandAsync($"AT+SP={fileName}", 200);
+        var response = await SendCommandAsync($"AT+SP={fileName}", 200, discardInBuffer: false);
         if (response.Contains("+evn:SP,"))
         {
             CurrentImageName = fileName;
@@ -848,20 +851,9 @@ public class BusyTagDevice(string? portName)
         }
     }
 
-    // public void SendRgbColor(int red = 0, int green = 0, int blue = 0, int ledBits = 127)
-    // {
-    //     SendCommand($"AT+SC={ledBits:d},{red:X2}{green:X2}{blue:X2}\r\n");
-    //     var eventArgs = new LedArgs
-    //     {
-    //         LedBits = ledBits,
-    //         Color = $"{red:X2}{green:X2}{blue:X2}"
-    //     };
-    //     ReceivedSolidColor?.Invoke(this, eventArgs);
-    // }
-
     public async Task<bool> SendRgbColorAsync(int red = 0, int green = 0, int blue = 0, int ledBits = 127)
     {
-        var response = await SendCommandAsync($"AT+SC={ledBits:d},{red:X2}{green:X2}{blue:X2}");
+        var response = await SendCommandAsync($"AT+SC={ledBits:d},{red:X2}{green:X2}{blue:X2}", waitForFirstResponse:false);
         if (response.Contains("OK"))
         {
             ReceivedSolidColor?.Invoke(this,
@@ -918,7 +910,8 @@ public class BusyTagDevice(string? portName)
         }
         else
         {
-            if (_busyTagDrive == null) return false; // TODO Possibly change to exception
+            if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
+            if (_busyTagDrive == null) return false;
 
             GetConfigJsonFile();
             _deviceConfig.ActivatePattern = false;
@@ -992,7 +985,8 @@ public class BusyTagDevice(string? portName)
             {
                 await SendFileViaSerial(sourcePath); 
                 _sendingFile = false;
-                await GetFileListAsync();
+                // await GetFileListAsync();
+                FileList.AddRange(new FileStruct(fileName, new FileInfo(sourcePath).Length));
             });
             return;
         }
@@ -1015,11 +1009,11 @@ public class BusyTagDevice(string? portName)
             await using var fsOut = new FileStream(destPath, FileMode.Create);
             await using var fsIn = new FileStream(sourcePath, FileMode.Open);
 
-            if (fsOut == null || fsIn == null)
-            {
-                CancelFileUpload(false);
-                return;
-            }
+            // if (fsOut == null || fsIn == null)
+            // {
+            //     CancelFileUpload(false);
+            //     return;
+            // }
 
 #if MACCATALYST
             var buffer = new byte[8192 * 32];
@@ -1048,7 +1042,8 @@ public class BusyTagDevice(string? portName)
         }, _ctsForFileSending.Token);
         
         _sendingFile = false;
-        await GetFileListAsync();
+        FileList.AddRange(new FileStruct(fileName, new FileInfo(sourcePath).Length));
+        // await GetFileListAsync();
     }
 
     private async Task<bool> SendFileViaSerial(string sourcePath)
@@ -1074,7 +1069,7 @@ public class BusyTagDevice(string? portName)
         const int chunkSize = 1024 * 8;
         var totalBytesTransferred = 0f;
 
-        var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 100);
+        var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 100, false);
         if (response.Contains(">"))
         {
             for (var i = 0; i < data.Length; i += chunkSize)
@@ -1109,7 +1104,7 @@ public class BusyTagDevice(string? portName)
                     FileUploadProgress?.Invoke(this, args);
 
                     // Small delay to prevent overwhelming the UI thread
-                    // await Task.Delay(1, _ctsForFileSending.Token);
+                    await Task.Delay(1, _ctsForFileSending.Token);
                 }
                 catch (Exception ex)
                 {
@@ -1217,7 +1212,7 @@ public class BusyTagDevice(string? portName)
         else
         {
             if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
-            if (_busyTagDrive == null) return false; // TODO Possibly change to exception
+            if (_busyTagDrive == null) return false;
 
             var path = Path.Combine(_busyTagDrive.Name, fileName);
             try
@@ -1438,12 +1433,6 @@ public class BusyTagDevice(string? portName)
         var fileStruct = new FileStruct(fileName, fileInfo.Length);
         return fileStruct;
     }
-
-    // public void ShowPicture(string fileName)
-    // {
-    //     // ReSharper disable once StringLiteralTypo
-    //     SendCommand($"AT+SP={fileName}");
-    // }
 
     // ReSharper disable once InconsistentNaming
     private void GetConfigJsonFile()
