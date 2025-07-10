@@ -2,40 +2,106 @@
 using System.IO.Ports;
 using System.Management;
 using System.Runtime.InteropServices;
-using BusyTag.Lib.Util;
 
 namespace BusyTag.Lib;
 
-public class BusyTagManager
+public class BusyTagManager : IDisposable
 {
     public event EventHandler<List<string>?>? FoundBusyTagSerialDevices;
+    public event EventHandler<string>? DeviceConnected;
+    public event EventHandler<string>? DeviceDisconnected;
+    
     private List<string>? _busyTagSerialDevices = new();
+    private List<string>? _previousBusyTagSerialDevices = new();
     private static bool _isScanningForDevices = false;
+    private Timer? _periodicSearchTimer;
+    private bool _isPeriodicSearchEnabled = false;
+    private readonly object _lockObject = new object();
+    private bool _disposed = false;
 
     public string[] AllSerialPorts()
     {
         return SerialPort.GetPortNames();
     }
 
-    public void FindBusyTagDevice()
+    public void StartPeriodicDeviceSearch(int intervalMs = 5000)
+    {
+        lock (_lockObject)
+        {
+            if (_isPeriodicSearchEnabled)
+                return;
+
+            _isPeriodicSearchEnabled = true;
+            _periodicSearchTimer = new Timer(PeriodicSearchCallback, null, 0, intervalMs);
+        }
+    }
+
+    public void StopPeriodicDeviceSearch()
+    {
+        lock (_lockObject)
+        {
+            _isPeriodicSearchEnabled = false;
+            _periodicSearchTimer?.Dispose();
+            _periodicSearchTimer = null;
+        }
+    }
+
+    private async void PeriodicSearchCallback(object? state)
+    {
+        if (!_isPeriodicSearchEnabled)
+            return;
+
+        _ = await FindBusyTagDevice();
+    }
+
+    public async Task<List<string>?> FindBusyTagDevice()
     {
         // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: {_isScanningForDevices}");
-        if (_isScanningForDevices) return;
+        if (_isScanningForDevices) return null;
         _isScanningForDevices = true;
         
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                _ = DiscoverByVidPidWindowsAsync();
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                _ = DiscoverByVidPidMacOsAsync();
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            {
-                _ = DiscoverByVidPidLinuxAsync();
-            }
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return await DiscoverByVidPidWindowsAsync();
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return await DiscoverByVidPidMacOsAsync();
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return await DiscoverByVidPidLinuxAsync();
+        }
         
+        return null;
+    }
+
+    private void CheckForDeviceChanges()
+    {
+        lock (_lockObject)
+        {
+            if (_busyTagSerialDevices == null || _previousBusyTagSerialDevices == null)
+            {
+                _previousBusyTagSerialDevices = _busyTagSerialDevices?.ToList() ?? new List<string>();
+                return;
+            }
+
+            // Check for newly connected devices
+            var newDevices = _busyTagSerialDevices.Except(_previousBusyTagSerialDevices).ToList();
+            foreach (var device in newDevices)
+            {
+                DeviceConnected?.Invoke(this, device);
+            }
+
+            // Check for disconnected devices
+            var disconnectedDevices = _previousBusyTagSerialDevices.Except(_busyTagSerialDevices).ToList();
+            foreach (var device in disconnectedDevices)
+            {
+                DeviceDisconnected?.Invoke(this, device);
+            }
+
+            _previousBusyTagSerialDevices = _busyTagSerialDevices.ToList();
+        }
     }
     
     #region Windows VID/PID Discovery
@@ -52,6 +118,7 @@ public class BusyTagManager
         catch (Exception ex)
         {
             Console.WriteLine($"[DEBUG] Windows VID/PID discovery failed: {ex.Message}");
+            _isScanningForDevices = false;
             return null;
         }
     }
@@ -59,6 +126,7 @@ public class BusyTagManager
     private List<string>? FindPortByVidPidWindows(string vid, string pid)
     {
         var deviceId = $"VID_{vid}&PID_{pid}";
+        var foundDevices = new List<string>();
         
         try
         {
@@ -83,11 +151,16 @@ public class BusyTagManager
                             {
                                 var port = $"COM{match.Groups[1].Value}";
                                 Console.WriteLine($"[INFO] Found BusyTag device on {port} via VID/PID");
-                                if(_busyTagSerialDevices != null && !_busyTagSerialDevices.Contains(port))
-                                    _busyTagSerialDevices?.Add(port);
+                                foundDevices.Add(port);
                             }
                         }
                     }
+                }
+
+                lock (_lockObject)
+                {
+                    _busyTagSerialDevices = foundDevices;
+                    CheckForDeviceChanges();
                 }
 
                 _isScanningForDevices = false;
@@ -98,6 +171,7 @@ public class BusyTagManager
         catch (Exception ex)
         {
             Console.WriteLine($"[DEBUG] Windows WMI query failed: {ex.Message}");
+            _isScanningForDevices = false;
         }
         
         return null;
@@ -105,6 +179,7 @@ public class BusyTagManager
 #else
     private Task<List<string>?> DiscoverByVidPidWindowsAsync()
     {
+        _isScanningForDevices = false;
         return Task.FromResult<List<string>?>(null);
     }
 #endif
@@ -128,10 +203,22 @@ public class BusyTagManager
                 // Found the device, now find associated serial port
                 return await FindMacOsSerialPortAsync();
             }
+            else
+            {
+                // Device not found, clear the list
+                lock (_lockObject)
+                {
+                    _busyTagSerialDevices = new List<string>();
+                    CheckForDeviceChanges();
+                }
+                _isScanningForDevices = false;
+                FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
+            }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[DEBUG] macOS VID/PID discovery failed: {ex.Message}");
+            _isScanningForDevices = false;
         }
 
         return null;
@@ -204,6 +291,8 @@ public class BusyTagManager
 
     private async Task<List<string>?> FindMacOsSerialPortAsync()
     {
+        var foundDevices = new List<string>();
+        
         try
         {
             // Look for serial devices that might be our BusyTag
@@ -232,14 +321,20 @@ public class BusyTagManager
                     var response = testPort.ReadExisting();
                     if (!response.Contains("+DN:busytag-")) continue;
                     Console.WriteLine($"[INFO] Found BusyTag device on {port} via macOS discovery");
-                    if(_busyTagSerialDevices != null && !_busyTagSerialDevices.Contains(port))
-                        _busyTagSerialDevices?.Add(port);
+                    foundDevices.Add(port);
                 }
                 catch
                 {
                     continue;
                 }
             }
+
+            lock (_lockObject)
+            {
+                _busyTagSerialDevices = foundDevices;
+                CheckForDeviceChanges();
+            }
+
             _isScanningForDevices = false;
             FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
             return _busyTagSerialDevices;
@@ -247,6 +342,7 @@ public class BusyTagManager
         catch (Exception ex)
         {
             Console.WriteLine($"[DEBUG] macOS serial port discovery failed: {ex.Message}");
+            _isScanningForDevices = false;
         }
 
         return null;
@@ -285,10 +381,22 @@ public class BusyTagManager
                 // Device found, look for an associated tty device
                 return await FindLinuxSerialPortAsync();
             }
+            else
+            {
+                // Device not found, clear the list
+                lock (_lockObject)
+                {
+                    _busyTagSerialDevices = new List<string>();
+                    CheckForDeviceChanges();
+                }
+                _isScanningForDevices = false;
+                FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
+            }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[DEBUG] Linux VID/PID discovery failed: {ex.Message}");
+            _isScanningForDevices = false;
         }
 
         return null;
@@ -296,6 +404,8 @@ public class BusyTagManager
 
     private async Task<List<string>?> FindLinuxSerialPortAsync()
     {
+        var foundDevices = new List<string>();
+        
         try
         {
             var ports = SerialPort.GetPortNames();
@@ -321,14 +431,20 @@ public class BusyTagManager
                     var response = testPort.ReadExisting();
                     if (!response.Contains("+DN:busytag-")) continue;
                     Console.WriteLine($"[INFO] Found BusyTag device on {port} via Linux discovery");
-                    if(_busyTagSerialDevices != null && !_busyTagSerialDevices.Contains(port))
-                        _busyTagSerialDevices?.Add(port);
+                    foundDevices.Add(port);
                 }
                 catch
                 {
                     continue;
                 }
             }
+
+            lock (_lockObject)
+            {
+                _busyTagSerialDevices = foundDevices;
+                CheckForDeviceChanges();
+            }
+
             _isScanningForDevices = false;
             FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
             return _busyTagSerialDevices;
@@ -336,11 +452,39 @@ public class BusyTagManager
         catch (Exception ex)
         {
             Console.WriteLine($"[DEBUG] Linux serial port discovery failed: {ex.Message}");
+            _isScanningForDevices = false;
         }
 
         return null;
     }
 
     #endregion
-    
+
+    #region IDisposable Implementation
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
+            return;
+
+        if (disposing)
+        {
+            StopPeriodicDeviceSearch();
+        }
+
+        _disposed = true;
+    }
+
+    ~BusyTagManager()
+    {
+        Dispose(false);
+    }
+
+    #endregion
 }
