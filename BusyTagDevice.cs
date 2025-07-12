@@ -948,7 +948,7 @@ public class BusyTagDevice(string? portName)
             {
                 await SendFileViaSerial(sourcePath); 
                 _sendingFile = false;
-                FileList.AddRange(new FileStruct(fileName, new FileInfo(sourcePath).Length));
+                FileList.Add(new FileStruct(fileName, new FileInfo(sourcePath).Length));
             });
             return;
         }
@@ -998,7 +998,7 @@ public class BusyTagDevice(string? portName)
         }, _ctsForFileSending.Token);
         
         _sendingFile = false;
-        FileList.AddRange(new FileStruct(fileName, new FileInfo(sourcePath).Length));
+        FileList.Add(new FileStruct(fileName, new FileInfo(sourcePath).Length));
     }
 
     private async Task<bool> SendFileViaSerial(string sourcePath)

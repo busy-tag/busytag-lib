@@ -1,30 +1,69 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net9.0</TargetFramework>
-        
-<!--        <WindowsPackageType>MSIX</WindowsPackageType>-->
+        <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <LangVersion>latestmajor</LangVersion>
+        <RootNamespace>BusyTag.Lib</RootNamespace>
+
+        <!-- NuGet Package Information -->
+        <PackageId>BusyTag.Lib</PackageId>
+        <Version>0.1.5</Version>
+        <AssemblyVersion>0.1.5.0</AssemblyVersion>
+        <FileVersion>0.1.5.0</FileVersion>
+
+        <!-- Package Metadata -->
+        <Title>BusyTag Device Management Library</Title>
+        <Authors>Kristaps Pastars</Authors>
+        <Company>Greynut SIA</Company>
+        <Product>Busy Tag</Product>
+        <Description>A comprehensive library for managing Busy Tag devices via serial communication. Supports device discovery, file management, LED control, and pattern configuration.</Description>
+        <Summary>Library for Busy Tag device management and control</Summary>
+        <PackageTags>busytag;serial;device;led;iot;hardware</PackageTags>
+
+        <!-- URLs and Links -->
+        <PackageProjectUrl>https://github.com/Greynut-Development/busytag-lib</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/Greynut-Development/busytag-lib.git</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+
+        <!-- Legal -->
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+<!--        <PackageLicenseFile>LICENSE</PackageLicenseFile> -->
+        <Copyright>Copyright © 2025 BUSY TAG SIA</Copyright>
+
+        <!-- Package Icon (optional) -->
+        <PackageIcon>icon.png</PackageIcon>
+
+        <!-- Release Notes -->
+        <PackageReleaseNotes>
+            Initial release of BusyTag.Lib
+            - Device discovery and connection
+            - File upload/download/delete
+            - LED color and pattern control
+            - Cross-platform support (Windows, macOS, Linux)
+        </PackageReleaseNotes>
+
+        <!-- Build Configuration -->
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
 
         <!-- Define compilation symbols for different platforms -->
         <DefineConstants Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(DefineConstants);WINDOWS</DefineConstants>
         <DefineConstants Condition="$([MSBuild]::IsOSPlatform('OSX'))">$(DefineConstants);MACOS</DefineConstants>
         <DefineConstants Condition="$([MSBuild]::IsOSPlatform('Linux'))">$(DefineConstants);LINUX</DefineConstants>
-        
-<!--        TODO Possibly add supported OS platform version-->
-        <LangVersion>latestmajor</LangVersion>
-        <RootNamespace>BusyTag.Lib</RootNamespace>
-<!--        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">12.2</SupportedOSPlatformVersion>-->
-<!--        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>-->
-<!--        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>-->
-<!--        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>-->
-<!--        <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>-->
-<!--        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'tizen'">6.5</SupportedOSPlatformVersion>-->
-<!--        <Configurations>Debug;Release;Win Debug;ReleaseSigned</Configurations>-->
-<!--        <Platforms>AnyCPU</Platforms>-->
     </PropertyGroup>
 
+    <!-- Include additional files in package -->
+    <ItemGroup>
+        <None Include="README.md" Pack="true" PackagePath="\" />
+        <None Include="icon.png" Pack="true" PackagePath="\" />
+<!--        <None Include="LICENSE" Pack="true" PackagePath="\" />-->
+    </ItemGroup>
+
+    <!-- Dependencies -->
     <ItemGroup>
         <PackageReference Include="System.IO.Ports" Version="9.0.7" />
         <PackageReference Include="System.Text.Json" Version="9.0.7" />

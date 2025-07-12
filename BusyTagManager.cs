@@ -19,6 +19,9 @@ public class BusyTagManager : IDisposable
     private readonly object _lockObject = new object();
     private bool _disposed = false;
 
+    // Add this property to control logging verbosity
+    public bool EnableVerboseLogging { get; set; } = false;
+
     public string[] AllSerialPorts()
     {
         return SerialPort.GetPortNames();
@@ -117,7 +120,8 @@ public class BusyTagManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DEBUG] Windows VID/PID discovery failed: {ex.Message}");
+            if (EnableVerboseLogging)
+                Console.WriteLine($"[DEBUG] Windows VID/PID discovery failed: {ex.Message}");
             _isScanningForDevices = false;
             return null;
         }
@@ -150,7 +154,13 @@ public class BusyTagManager : IDisposable
                             if (match.Success)
                             {
                                 var port = $"COM{match.Groups[1].Value}";
-                                Console.WriteLine($"[INFO] Found BusyTag device on {port} via VID/PID");
+                                
+                                // Only log on first discovery or if verbose logging is enabled
+                                if (EnableVerboseLogging || !foundDevices.Contains(port))
+                                {
+                                    Trace.WriteLine($"[INFO] Found BusyTag device on {port} via VID/PID");
+                                }
+                                
                                 foundDevices.Add(port);
                             }
                         }
@@ -170,7 +180,8 @@ public class BusyTagManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DEBUG] Windows WMI query failed: {ex.Message}");
+            if (EnableVerboseLogging)
+                Console.WriteLine($"[DEBUG] Windows WMI query failed: {ex.Message}");
             _isScanningForDevices = false;
         }
         
@@ -217,7 +228,8 @@ public class BusyTagManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DEBUG] macOS VID/PID discovery failed: {ex.Message}");
+            if (EnableVerboseLogging)
+                Console.WriteLine($"[DEBUG] macOS VID/PID discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
@@ -320,7 +332,9 @@ public class BusyTagManager : IDisposable
                     if (testPort.BytesToRead <= 0) continue;
                     var response = testPort.ReadExisting();
                     if (!response.Contains("+DN:busytag-")) continue;
-                    Console.WriteLine($"[INFO] Found BusyTag device on {port} via macOS discovery");
+                    
+                    if (EnableVerboseLogging)
+                        Console.WriteLine($"[INFO] Found BusyTag device on {port} via macOS discovery");
                     foundDevices.Add(port);
                 }
                 catch
@@ -341,7 +355,8 @@ public class BusyTagManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DEBUG] macOS serial port discovery failed: {ex.Message}");
+            if (EnableVerboseLogging)
+                Console.WriteLine($"[DEBUG] macOS serial port discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
@@ -395,7 +410,8 @@ public class BusyTagManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DEBUG] Linux VID/PID discovery failed: {ex.Message}");
+            if (EnableVerboseLogging)
+                Console.WriteLine($"[DEBUG] Linux VID/PID discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
@@ -430,7 +446,9 @@ public class BusyTagManager : IDisposable
                     if (testPort.BytesToRead <= 0) continue;
                     var response = testPort.ReadExisting();
                     if (!response.Contains("+DN:busytag-")) continue;
-                    Console.WriteLine($"[INFO] Found BusyTag device on {port} via Linux discovery");
+                    
+                    if (EnableVerboseLogging)
+                        Console.WriteLine($"[INFO] Found BusyTag device on {port} via Linux discovery");
                     foundDevices.Add(port);
                 }
                 catch
@@ -451,7 +469,8 @@ public class BusyTagManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DEBUG] Linux serial port discovery failed: {ex.Message}");
+            if (EnableVerboseLogging)
+                Console.WriteLine($"[DEBUG] Linux serial port discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
