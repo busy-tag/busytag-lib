@@ -26,7 +26,7 @@ dotnet add package BusyTag.Lib
 
 ### PackageReference
 ```xml
-<PackageReference Include="BusyTag.Lib" Version="0.1.1" />
+<PackageReference Include="BusyTag.Lib" Version="0.2.0" />
 ```
 
 ## Quick Start
@@ -309,7 +309,7 @@ For issues and questions:
 
 ## Changelog
 
-### v0.1.5
+### v0.2.0
 - Initial release
 - Device discovery and connection
 - File upload/download/delete functionality
