@@ -69,22 +69,22 @@ public class BusyTagDevice(string? portName)
                     Disconnect();
                 }
 #if MACCATALYST
-                if (!_skipChecking)
-                {
-                    try
-                    {
-                        // Send a simple command to check if the device is responsive
-                        _serialPort?.WriteLine("AT\r\n");
-                        // SendCommand("AT\r\n");
-                    }
-                    catch (Exception ex)
-                    {
-                        Trace.WriteLine($"Exception in connection check: {ex.Message}");
-                        Disconnect();
-                    }
-                }
-
-                _skipChecking = false;
+                // if (!_skipChecking)
+                // {
+                //     try
+                //     {
+                //         // Send a simple command to check if the device is responsive
+                //         _serialPort?.WriteLine("AT\r\n");
+                //         // SendCommand("AT\r\n");
+                //     }
+                //     catch (Exception ex)
+                //     {
+                //         Trace.WriteLine($"Exception in connection check: {ex.Message}");
+                //         Disconnect();
+                //     }
+                // }
+                //
+                // _skipChecking = false;
 #endif
             }
         }, token);
@@ -93,11 +93,14 @@ public class BusyTagDevice(string? portName)
 
     public async Task Connect()
     {
+    // _serialPort = new SerialPort(PortName, 115200, Parity.None, 8, StopBits.One);
         _serialPort = new SerialPort(PortName, 460800, Parity.None, 8, StopBits.One);
-        _serialPort.ReadTimeout = 2000;
-        _serialPort.WriteTimeout = 2000;
-        _serialPort.DtrEnable = true;
-        _serialPort.RtsEnable = true;
+        _serialPort.ReadTimeout = 4000;
+        _serialPort.WriteTimeout = 4000;
+        _serialPort.DtrEnable = false;
+        _serialPort.RtsEnable = false;
+        _serialPort.Handshake = Handshake.None;
+        // _serialPort.ReceivedBytesThreshold = 1;
         _serialPort.WriteBufferSize = 1024 * 1024;
         _serialPort.ReadBufferSize = 1024 * 1024;
         _serialPort.DataReceived += sp_DataReceived;
@@ -183,6 +186,7 @@ public class BusyTagDevice(string? portName)
 
         lock (_lockObject)
         {
+            Trace.WriteLine($"Sending raw data count: {count}");
             _serialPort?.Write(data, offset, count);
         }
     }
@@ -1050,6 +1054,7 @@ public class BusyTagDevice(string? portName)
                 try
                 {
                     SendRawData(chunkData, 0, chunkData.Length);
+                    // await _serialPort?.BaseStream.WriteAsync(chunkData, 0, chunkData.Length)!;
                     totalBytesTransferred += chunkData.Length;
 
                     // Calculate progress more precisely
@@ -1058,7 +1063,7 @@ public class BusyTagDevice(string? portName)
                     FileUploadProgress?.Invoke(this, args);
 
                     // Small delay to prevent overwhelming the UI thread
-                    await Task.Delay(1, _ctsForFileSending.Token);
+                    // await Task.Delay(1, _ctsForFileSending.Token);
                 }
                 catch (Exception ex)
                 {

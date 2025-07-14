@@ -309,7 +309,7 @@ For issues and questions:
 
 ## Changelog
 
-### v0.2.0
+### v0.2.1
 - Initial release
 - Device discovery and connection
 - File upload/download/delete functionality

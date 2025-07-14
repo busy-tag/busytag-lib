@@ -1,7 +1,10 @@
 ﻿using System.Diagnostics;
 using System.IO.Ports;
-using System.Management;
 using System.Runtime.InteropServices;
+
+#if WINDOWS
+using System.Management;
+#endif
 
 namespace BusyTag.Lib;
 
@@ -62,20 +65,19 @@ public class BusyTagManager : IDisposable
         // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: {_isScanningForDevices}");
         if (_isScanningForDevices) return null;
         _isScanningForDevices = true;
+
+#if WINDOWS
+        // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: Windows");
+        return await DiscoverByVidPidWindowsAsync();
+#elif MACOS
+        // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: MACOS");
+        return await DiscoverByVidPidMacOsAsync();
+#elif LINUX
+        // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: Linux");
+        return await DiscoverByVidPidLinuxAsync();
+#endif
         
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            return await DiscoverByVidPidWindowsAsync();
-        }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            return await DiscoverByVidPidMacOsAsync();
-        }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            return await DiscoverByVidPidLinuxAsync();
-        }
-        
+        // Trace.WriteLine($"RuntimeInformation: {RuntimeInformation.OSDescription}");
         return null;
     }
 
@@ -208,8 +210,9 @@ public class BusyTagManager : IDisposable
             
             const string targetVid = "303A";
             const string targetPid = "81DF";
-            
-            if (usbDevices.ContainsKey($"{targetVid}:{targetPid}"))
+
+            const string key = $"{targetVid}:{targetPid}";
+            if (usbDevices.ContainsKey(key))
             {
                 // Found the device, now find associated serial port
                 return await FindMacOsSerialPortAsync();
@@ -273,7 +276,7 @@ public class BusyTagManager : IDisposable
                     {
                         currentVid = parts[1].Trim().Trim('"').Trim(',');
                         if (currentVid.StartsWith("0x"))
-                            currentVid = currentVid.Substring(2);
+                            currentVid = currentVid.Substring(2).ToUpper().Trim('"');
                     }
                 }
                 else if (line.Contains("\"product_id\""))
@@ -283,7 +286,7 @@ public class BusyTagManager : IDisposable
                     {
                         currentPid = parts[1].Trim().Trim('"').Trim(',');
                         if (currentPid.StartsWith("0x"))
-                            currentPid = currentPid.Substring(2);
+                            currentPid = currentPid.Substring(2).ToUpper().Trim('"');
                     }
                 }
 
@@ -311,10 +314,13 @@ public class BusyTagManager : IDisposable
             var ports = SerialPort.GetPortNames();
             
             // Filter for USB serial devices (usually start with /dev/cu.usbserial or /dev/cu.usbmodem)
+            // var usbPorts = ports.Where(p => 
+            //     p.StartsWith("/dev/cu.usbserial") || 
+            //     p.StartsWith("/dev/cu.usbmodem") ||
+            //     p.StartsWith("/dev/tty.usbserial") ||
+            //     p.StartsWith("/dev/tty.usbmodem")).ToArray();
+            
             var usbPorts = ports.Where(p => 
-                p.StartsWith("/dev/cu.usbserial") || 
-                p.StartsWith("/dev/cu.usbmodem") ||
-                p.StartsWith("/dev/tty.usbserial") ||
                 p.StartsWith("/dev/tty.usbmodem")).ToArray();
 
             foreach (var port in usbPorts)
