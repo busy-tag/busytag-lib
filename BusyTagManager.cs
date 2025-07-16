@@ -62,22 +62,16 @@ public class BusyTagManager : IDisposable
 
     public async Task<List<string>?> FindBusyTagDevice()
     {
-        // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: {_isScanningForDevices}");
         if (_isScanningForDevices) return null;
         _isScanningForDevices = true;
 
 #if WINDOWS
-        // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: Windows");
         return await DiscoverByVidPidWindowsAsync();
 #elif MACOS
-        // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: MACOS");
         return await DiscoverByVidPidMacOsAsync();
 #elif LINUX
-        // Trace.WriteLine($"FindBusyTagDevice(), _isScanningForDevices: Linux");
         return await DiscoverByVidPidLinuxAsync();
 #endif
-        
-        // Trace.WriteLine($"RuntimeInformation: {RuntimeInformation.OSDescription}");
         return null;
     }
 
@@ -158,10 +152,10 @@ public class BusyTagManager : IDisposable
                                 var port = $"COM{match.Groups[1].Value}";
                                 
                                 // Only log on first discovery or if verbose logging is enabled
-                                if (EnableVerboseLogging || !foundDevices.Contains(port))
-                                {
-                                    Trace.WriteLine($"[INFO] Found BusyTag device on {port} via VID/PID");
-                                }
+                                // if (EnableVerboseLogging || !foundDevices.Contains(port))
+                                // {
+                                //     Trace.WriteLine($"[INFO] Found BusyTag device on {port} via VID/PID");
+                                // }
                                 
                                 foundDevices.Add(port);
                             }

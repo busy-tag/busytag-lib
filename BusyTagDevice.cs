@@ -21,7 +21,7 @@ public class BusyTagDevice(string? portName)
     public event EventHandler<bool>? ReceivedUsbMassStorageActive;
     public event EventHandler<int>? ReceivedDisplayBrightness;
     public event EventHandler<List<FileStruct>>? FileListUpdated;
-    public event EventHandler<bool>? FileUploadFinished;
+    public event EventHandler<FileUploadFinishedArgs>? FileUploadFinished;
     public event EventHandler<UploadProgressArgs>? FileUploadProgress;
     public event EventHandler<string>? ReceivedShowingPicture;
     public event EventHandler<float>? FirmwareUpdateStatus;
@@ -46,9 +46,11 @@ public class BusyTagDevice(string? portName)
     public string LocalHostAddress { get; private set; } = string.Empty;
 
     public long FreeStorageSize { get; private set; }
-
     public long TotalStorageSize { get; private set; }
     private DriveInfo? _busyTagDrive;
+    
+    private string _currentUploadFileName = string.Empty;
+    
     private readonly List<PatternLine> _patternList = [];
     private bool _asyncCommandActive;
     private bool _isPlayingPattern = false;
@@ -93,12 +95,11 @@ public class BusyTagDevice(string? portName)
 
     public async Task Connect()
     {
-    // _serialPort = new SerialPort(PortName, 115200, Parity.None, 8, StopBits.One);
         _serialPort = new SerialPort(PortName, 460800, Parity.None, 8, StopBits.One);
         _serialPort.ReadTimeout = 4000;
         _serialPort.WriteTimeout = 4000;
         _serialPort.DtrEnable = false;
-        _serialPort.RtsEnable = false;
+        _serialPort.RtsEnable = true;
         _serialPort.Handshake = Handshake.None;
         // _serialPort.ReceivedBytesThreshold = 1;
         _serialPort.WriteBufferSize = 1024 * 1024;
@@ -191,33 +192,7 @@ public class BusyTagDevice(string? portName)
         }
     }
 
-    // private bool SendCommand(string data)
-    // {
-    //     if (!IsConnected)
-    //     {
-    //         Disconnect();
-    //         return false;
-    //         // throw new InvalidOperationException("Not connected to device");
-    //     }
-    //     
-    //     if ( _receivingFile) return false;
-    //     
-    //     var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-    //     Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{data}");
-    //     try
-    //     {
-    //         _serialPort?.WriteLine(data);
-    //         _skipChecking = true;
-    //     }
-    //     catch (Exception e)
-    //     {
-    //         Trace.WriteLine(e);
-    //     }
-    //
-    //     return true;
-    // }
-
-    private Task<string> SendCommandAsync(string command, int timeoutMs = 100, bool waitForFirstResponse = true,
+    private Task<string> SendCommandAsync(string command, int timeoutMs = 150, bool waitForFirstResponse = true,
         bool discardInBuffer = true)
     {
         if(_asyncCommandActive) return Task.FromResult<string>(null);
@@ -292,6 +267,7 @@ public class BusyTagDevice(string? portName)
 
     public async Task<byte[]> SendBytesAsync(byte[]? data, int timeoutMs = 3000, bool discardInBuffer = true)
     {
+        if (_asyncCommandActive || _sendingFile) return [];
         if (!IsConnected)
             throw new InvalidOperationException("Not connected to device");
 
@@ -347,6 +323,7 @@ public class BusyTagDevice(string? portName)
                 {
                     Trace.WriteLine($"[SENDBYTES] Exception: {ex.Message}");
                     throw new InvalidOperationException($"Binary operation failed: {ex.Message}", ex);
+                    // result = [];
                 }
             }
 
@@ -594,8 +571,9 @@ public class BusyTagDevice(string? portName)
                 {
                     if (_sendingFile)
                     {
-                        _sendingFile = false;
-                        CancelFileUpload(false);
+                        var errorMessage = line.Contains(":") ? line.Split(':').Last().Trim() : "Unknown device error";
+                        CancelFileUpload(false, UploadErrorType.DeviceError, 
+                            $"Device reported error: {errorMessage}");
                     }
                 }
             }
@@ -649,7 +627,7 @@ public class BusyTagDevice(string? portName)
         if (FirmwareVersionFloat >= 2.0)
         {
             // ReSharper disable once StringLiteralTypo
-            var response = await SendCommandAsync("AT+GFSS");
+            var response = await SendCommandAsync("AT+GFSS",200);
             var size = response.Contains("+FSS:") ? response.Split(':').Last() : "0";
             FreeStorageSize = long.Parse(size);
         }
@@ -683,7 +661,7 @@ public class BusyTagDevice(string? portName)
         FileList = new List<FileStruct>();
         if (FirmwareVersionFloat >= 2.0)
         {
-            var response = await SendCommandAsync("AT+GFL", 400, false);
+            var response = await SendCommandAsync("AT+GFL", 500, false);
             FileList = ParseFileList(response, "+FL:");
         }
         else
@@ -765,7 +743,7 @@ public class BusyTagDevice(string? portName)
 
     public async Task<bool> ShowPictureAsync(string fileName)
     {
-        var response = await SendCommandAsync($"AT+SP={fileName}", 200, discardInBuffer: false);
+        var response = await SendCommandAsync($"AT+SP={fileName}", 250);
         if (response.Contains("+evn:SP,"))
         {
             CurrentImageName = fileName;
@@ -929,7 +907,7 @@ public class BusyTagDevice(string? portName)
         var fileName = Path.GetFileName(sourcePath);
         // Saving in cached dir
         var destFilePath = Path.Combine(CachedFileDirPath, fileName);
-        if (!FileExistsInCache(fileName))
+        // if (!FileExistsInCache(fileName))
             File.Copy(sourcePath, destFilePath, true);
         _sendingFile = true;
         
@@ -941,7 +919,8 @@ public class BusyTagDevice(string? portName)
         FileUploadProgress?.Invoke(this, args);
         if (fileName.Length > MaxFilenameLength)
         {
-            FileUploadFinished?.Invoke(this, false);
+            CancelFileUpload(false, UploadErrorType.FilenameToolong, 
+                $"Filename '{fileName}' exceeds maximum length of {MaxFilenameLength} characters");
             return;
         }
 
@@ -950,59 +929,99 @@ public class BusyTagDevice(string? portName)
         {
             await Task.Run(async () =>
             {
-                await SendFileViaSerial(sourcePath); 
-                _sendingFile = false;
-                FileList.Add(new FileStruct(fileName, new FileInfo(sourcePath).Length));
+                try
+                {
+                    var success = await SendFileViaSerial(sourcePath);
+                    _sendingFile = false;
+                    
+                    if (success)
+                    {
+                        FileList.Add(new FileStruct(fileName, new FileInfo(sourcePath).Length));
+                        CancelFileUpload(true); // Success
+                    }
+                    // Error handling is done within SendFileViaSerial
+                }
+                catch (Exception ex)
+                {
+                    _sendingFile = false;
+                    CancelFileUpload(false, UploadErrorType.Unknown, 
+                        $"Unexpected error during file upload: {ex.Message}");
+                }
             });
             return;
         }
 
         if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
-        if (_busyTagDrive == null) return;
+        if (_busyTagDrive == null) 
+        {
+            CancelFileUpload(false, UploadErrorType.DeviceError, 
+                "Cannot find BusyTag drive for file transfer");
+            return;
+        }
 
         await Task.Run(async () =>
         {
-            var destPath = Path.Combine(_busyTagDrive.Name, fileName);
-            FileUploadProgress?.Invoke(this, args);
-
-            var isFreeSpaceAvailable = await FreeUpStorage(new FileInfo(sourcePath).Length);
-            if (!isFreeSpaceAvailable)
+            try
             {
-                CancelFileUpload(false);
-                return;
-            }
+                var destPath = Path.Combine(_busyTagDrive.Name, fileName);
+                FileUploadProgress?.Invoke(this, args);
 
-            await using var fsOut = new FileStream(destPath, FileMode.Create);
-            await using var fsIn = new FileStream(sourcePath, FileMode.Open);
+                var isFreeSpaceAvailable = await FreeUpStorage(new FileInfo(sourcePath).Length);
+                if (!isFreeSpaceAvailable)
+                {
+                    CancelFileUpload(false, UploadErrorType.InsufficientStorage, 
+                        "Insufficient storage space on device");
+                    return;
+                }
+
+                await using var fsOut = new FileStream(destPath, FileMode.Create);
+                await using var fsIn = new FileStream(sourcePath, FileMode.Open);
 
 #if MACCATALYST
-            var buffer = new byte[8192 * 32];
+                var buffer = new byte[8192 * 32];
 #else
-            var buffer = new byte[8192];
+                var buffer = new byte[8192];
 #endif
-            int readByte;
+                int readByte;
 
-            while ((readByte = fsIn.Read(buffer, 0, buffer.Length)) > 0 &&
-                   _ctsForFileSending.Token.IsCancellationRequested == false)
-            {
-                try
+                while ((readByte = fsIn.Read(buffer, 0, buffer.Length)) > 0 &&
+                       !_ctsForFileSending.Token.IsCancellationRequested)
                 {
-                    fsOut.Write(buffer, 0, readByte);
-                    args.ProgressLevel = (float)(fsIn.Position * 100.0 / fsIn.Length);
-                    FileUploadProgress?.Invoke(this, args);
+                    try
+                    {
+                        fsOut.Write(buffer, 0, readByte);
+                        args.ProgressLevel = (float)(fsIn.Position * 100.0 / fsIn.Length);
+                        FileUploadProgress?.Invoke(this, args);
+                    }
+                    catch (Exception ex)
+                    {
+                        _ = await DeleteFile(fileName);
+                        CancelFileUpload(false, UploadErrorType.TransferInterrupted, 
+                            $"File transfer was interrupted: {ex.Message}");
+                        return;
+                    }
                 }
-                catch (Exception)
+
+                if (_ctsForFileSending.Token.IsCancellationRequested)
                 {
                     _ = await DeleteFile(fileName);
-                    CancelFileUpload(false);
+                    CancelFileUpload(false, UploadErrorType.Cancelled, 
+                        "File upload was cancelled by user");
+                    return;
                 }
-            }
 
-            CancelFileUpload();
+                // Success
+                _sendingFile = false;
+                FileList.Add(new FileStruct(fileName, new FileInfo(sourcePath).Length));
+                CancelFileUpload(true); // Success
+            }
+            catch (Exception ex)
+            {
+                _sendingFile = false;
+                CancelFileUpload(false, UploadErrorType.Unknown, 
+                    $"File upload failed: {ex.Message}");
+            }
         }, _ctsForFileSending.Token);
-        
-        _sendingFile = false;
-        FileList.Add(new FileStruct(fileName, new FileInfo(sourcePath).Length));
     }
 
     private async Task<bool> SendFileViaSerial(string sourcePath)
@@ -1015,27 +1034,36 @@ public class BusyTagDevice(string? portName)
         };
         FileUploadProgress?.Invoke(this, args);
 
-        var fileSize = new FileInfo(sourcePath).Length;
-        var isFreeSpaceAvailable = await FreeUpStorage(fileSize);
-        if (!isFreeSpaceAvailable)
+       try
         {
-            CancelFileUpload(false);
-            return false;
-        }
+            var fileSize = new FileInfo(sourcePath).Length;
+            var isFreeSpaceAvailable = await FreeUpStorage(fileSize);
+            if (!isFreeSpaceAvailable)
+            {
+                CancelFileUpload(false, UploadErrorType.InsufficientStorage, 
+                    "Insufficient storage space on device");
+                return false;
+            }
 
-        var data = await File.ReadAllBytesAsync(sourcePath);
-        const int chunkSize = 1024 * 8;
-        var totalBytesTransferred = 0f;
+            var data = await File.ReadAllBytesAsync(sourcePath);
+            const int chunkSize = 1024 * 8;
+            var totalBytesTransferred = 0f;
 
-        var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 150);
-        if (response.Contains(">"))
-        {
+            var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 150);
+            if (!response.Contains(">"))
+            {
+                CancelFileUpload(false, UploadErrorType.DeviceError, 
+                    "Device did not respond properly to upload command");
+                return false;
+            }
+
             for (var i = 0; i < data.Length; i += chunkSize)
             {
-                // Check cancellation token if available
+                // Check cancellation token
                 if (_ctsForFileSending.Token.IsCancellationRequested)
                 {
-                    CancelFileUpload(false);
+                    CancelFileUpload(false, UploadErrorType.Cancelled, 
+                        "File upload was cancelled by user");
                     return false;
                 }
 
@@ -1047,28 +1075,26 @@ public class BusyTagDevice(string? portName)
                 if (!IsConnected)
                 {
                     Disconnect();
-                    CancelFileUpload(false);
+                    CancelFileUpload(false, UploadErrorType.ConnectionLost, 
+                        "Connection to device was lost during upload");
                     return false;
                 }
 
                 try
                 {
                     SendRawData(chunkData, 0, chunkData.Length);
-                    // await _serialPort?.BaseStream.WriteAsync(chunkData, 0, chunkData.Length)!;
                     totalBytesTransferred += chunkData.Length;
 
                     // Calculate progress more precisely
                     var progressLevel = (float)((double)totalBytesTransferred / data.Length * 100.0);
                     args.ProgressLevel = progressLevel;
                     FileUploadProgress?.Invoke(this, args);
-
-                    // Small delay to prevent overwhelming the UI thread
-                    // await Task.Delay(1, _ctsForFileSending.Token);
                 }
                 catch (Exception ex)
                 {
                     Trace.WriteLine($"Error sending chunk: {ex.Message}");
-                    CancelFileUpload(false);
+                    CancelFileUpload(false, UploadErrorType.TransferInterrupted, 
+                        $"Data transfer failed: {ex.Message}");
                     return false;
                 }
             }
@@ -1076,22 +1102,43 @@ public class BusyTagDevice(string? portName)
             // Final progress update
             args.ProgressLevel = 100.0f;
             FileUploadProgress?.Invoke(this, args);
+            
             response = await SendCommandAsync("", 1000, discardInBuffer: false);
             if (response.Contains("OK"))
             {
-                CancelFileUpload();
-                return true;
+                return true; // Success - CancelFileUpload will be called with success=true
+            }
+            else
+            {
+                CancelFileUpload(false, UploadErrorType.DeviceError, 
+                    "Device did not confirm successful upload");
+                return false;
             }
         }
-
-        CancelFileUpload(false);
-        return false;
+        catch (Exception ex)
+        {
+            CancelFileUpload(false, UploadErrorType.Unknown, 
+                $"Upload failed with exception: {ex.Message}");
+            return false;
+        }
     }
 
-    public void CancelFileUpload(bool successfullyFileUpload = true)
+    public void CancelFileUpload(bool successfullyFileUpload = true, UploadErrorType errorType = UploadErrorType.None, 
+        string? errorMessage = null)
     {
         _ctsForFileSending.Cancel();
-        FileUploadFinished?.Invoke(this, successfullyFileUpload);
+        var args = new FileUploadFinishedArgs
+        {
+            Success = successfullyFileUpload,
+            FileName = _currentUploadFileName,
+            ErrorType = errorType,
+            ErrorMessage = errorMessage
+        };
+        _sendingFile =  false;
+        FileUploadFinished?.Invoke(this, args);
+        
+        // Reset upload state
+        _currentUploadFileName = string.Empty;
     }
 
     // Function to delete the oldest image file in the directory
@@ -1133,10 +1180,11 @@ public class BusyTagDevice(string? portName)
         if (FirmwareVersionFloat >= 2.0)
         {
             var counter = 0;
+            await GetFreeStorageSizeAsync();
             while (FreeStorageSize < size)
             {
-                await GetFreeStorageSizeAsync();
                 if (await AutoDeleteFile() != true) return false;
+                await GetFreeStorageSizeAsync();
                 counter++;
                 if (counter < 20) continue;
                 return false;
@@ -1147,10 +1195,11 @@ public class BusyTagDevice(string? portName)
             if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
             if (_busyTagDrive == null) return false;
             var counter = 0;
+            await GetFreeStorageSizeAsync();
             while (FreeStorageSize < size)
             {
-                await GetFreeStorageSizeAsync();
                 DeleteOldestFileInDirectory(_busyTagDrive.Name);
+                await GetFreeStorageSizeAsync();
                 counter++;
                 if (counter < 20) continue;
                 return false;
