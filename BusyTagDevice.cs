@@ -53,6 +53,7 @@ public class BusyTagDevice(string? portName)
     
     private readonly List<PatternLine> _patternList = [];
     private bool _asyncCommandActive;
+    private bool _writeRawData;
     private bool _isPlayingPattern = false;
     private bool _sendingFile = false;
     private bool _skipChecking = false;
@@ -195,7 +196,7 @@ public class BusyTagDevice(string? portName)
     private Task<string> SendCommandAsync(string command, int timeoutMs = 150, bool waitForFirstResponse = true,
         bool discardInBuffer = true)
     {
-        if(_asyncCommandActive) return Task.FromResult<string>(null);
+        if(_asyncCommandActive || _writeRawData) return Task.FromResult<string>(null);
         if (!IsConnected)
         {
             Disconnect();
@@ -267,7 +268,7 @@ public class BusyTagDevice(string? portName)
 
     public async Task<byte[]> SendBytesAsync(byte[]? data, int timeoutMs = 3000, bool discardInBuffer = true)
     {
-        if (_asyncCommandActive || _sendingFile) return [];
+        if (_asyncCommandActive || _sendingFile || _writeRawData) return [];
         if (!IsConnected)
             throw new InvalidOperationException("Not connected to device");
 
@@ -743,7 +744,7 @@ public class BusyTagDevice(string? portName)
 
     public async Task<bool> ShowPictureAsync(string fileName)
     {
-        var response = await SendCommandAsync($"AT+SP={fileName}", 250);
+        var response = await SendCommandAsync($"AT+SP={fileName}", 300);
         if (response.Contains("+evn:SP,"))
         {
             CurrentImageName = fileName;
@@ -1057,6 +1058,7 @@ public class BusyTagDevice(string? portName)
                 return false;
             }
 
+            _writeRawData = true;
             for (var i = 0; i < data.Length; i += chunkSize)
             {
                 // Check cancellation token
@@ -1098,6 +1100,7 @@ public class BusyTagDevice(string? portName)
                     return false;
                 }
             }
+            _writeRawData = false;
 
             // Final progress update
             args.ProgressLevel = 100.0f;
