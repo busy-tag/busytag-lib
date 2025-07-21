@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.IO.Ports;
-using System.Runtime.InteropServices;
 
 #if WINDOWS
 using System.Management;
@@ -54,10 +53,17 @@ public class BusyTagManager : IDisposable
 
     private async void PeriodicSearchCallback(object? state)
     {
-        if (!_isPeriodicSearchEnabled)
-            return;
+        try
+        {
+            if (!_isPeriodicSearchEnabled)
+                return;
 
-        _ = await FindBusyTagDevice();
+            _ = await FindBusyTagDevice();
+        }
+        catch (Exception e)
+        {
+            Trace.WriteLine(e.Message);
+        }
     }
 
     public async Task<List<string>?> FindBusyTagDevice()
