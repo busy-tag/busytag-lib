@@ -6,4 +6,4 @@ riderModule.iml
 .idea/
 
 *.DotSettings.user
-nuget.config
+command_lines_for_publishing.txt
