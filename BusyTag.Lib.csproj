@@ -3,7 +3,7 @@
     <PropertyGroup>
 <!--        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net9.0-android;net9.0-ios;net9.0-windows10.0.19041.0</TargetFrameworks>-->
         <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net8.0;net9.0;</TargetFrameworks>
-        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('OSX'))">net9.0-maccatalyst;</TargetFrameworks>
+        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('OSX'))">net8.0;net9.0;net9.0-maccatalyst;</TargetFrameworks>
         
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
@@ -12,9 +12,9 @@
 
         <!-- NuGet Package Information -->
         <PackageId>BusyTag.Lib</PackageId>
-        <Version>0.2.3</Version>
-        <AssemblyVersion>0.2.3.0</AssemblyVersion>
-        <FileVersion>0.2.3.0</FileVersion>
+        <Version>0.3.0</Version>
+        <AssemblyVersion>0.3.0.0</AssemblyVersion>
+        <FileVersion>0.3.0.0</FileVersion>
 
         <!-- Package Metadata -->
         <Title>BusyTag Device Management Library</Title>

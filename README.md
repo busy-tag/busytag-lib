@@ -33,7 +33,7 @@ dotnet add package BusyTag.Lib
 
 ### PackageReference
 ```xml
-<PackageReference Include="BusyTag.Lib" Version="0.2.3" />
+<PackageReference Include="BusyTag.Lib" Version="0.3.0" />
 ```
 
 ## 🏃‍♂️ Quick Start
@@ -767,7 +767,10 @@ dotnet test
 
 ## 🔄 Changelog
 
-### v0.2.3 (Current)
+### v0.3.0 (Current)
+- 🔧 Little project configuration update
+
+### v0.2.3
 - 📚 Updated documentation and examples
 
 ### v0.2.2
