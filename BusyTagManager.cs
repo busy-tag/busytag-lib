@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.IO.Ports;
+using System.Runtime.InteropServices;
 
 #if WINDOWS
 using System.Management;
@@ -71,13 +72,21 @@ public class BusyTagManager : IDisposable
         if (_isScanningForDevices) return null;
         _isScanningForDevices = true;
 
-#if WINDOWS
-        return await DiscoverByVidPidWindowsAsync();
-#elif MACOS
-        return await DiscoverByVidPidMacOsAsync();
-#elif LINUX
-        return await DiscoverByVidPidLinuxAsync();
-#endif
+        // Use runtime platform detection instead of compile-time
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return await DiscoverByVidPidWindowsAsync();
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return await DiscoverByVidPidMacOsAsync();
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return await DiscoverByVidPidLinuxAsync();
+        }
+        
+        _isScanningForDevices = false;
         return null;
     }
 
@@ -110,7 +119,7 @@ public class BusyTagManager : IDisposable
     }
     
     #region Windows VID/PID Discovery
-#if WINDOWS
+
     private async Task<List<string>?> DiscoverByVidPidWindowsAsync()
     {
         try
@@ -129,13 +138,14 @@ public class BusyTagManager : IDisposable
         }
     }
     
-    private List<string>? FindPortByVidPidWindows(string vid, string pid)
+    private async Task<List<string>?> FindPortByVidPidWindows(string vid, string pid)
     {
         var deviceId = $"VID_{vid}&PID_{pid}";
         var foundDevices = new List<string>();
         
         try
         {
+#if WINDOWS
             // Query WMI for USB devices
             const string query = "SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%USB%'";
 
@@ -156,29 +166,29 @@ public class BusyTagManager : IDisposable
                             if (match.Success)
                             {
                                 var port = $"COM{match.Groups[1].Value}";
-                                
-                                // Only log on first discovery or if verbose logging is enabled
-                                // if (EnableVerboseLogging || !foundDevices.Contains(port))
-                                // {
-                                //     Trace.WriteLine($"[INFO] Found BusyTag device on {port} via VID/PID");
-                                // }
-                                
                                 foundDevices.Add(port);
                             }
                         }
                     }
                 }
-
-                lock (_lockObject)
-                {
-                    _busyTagSerialDevices = foundDevices;
-                    CheckForDeviceChanges();
-                }
-
-                _isScanningForDevices = false;
-                FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
-                return _busyTagSerialDevices;
             }
+#else
+            // If System.Management is not available, fall back to AT command testing
+            if (EnableVerboseLogging)
+                Console.WriteLine("[DEBUG] System.Management not available, falling back to AT command testing");
+            
+            return await FindDeviceByAtCommandAsync();
+#endif
+
+            lock (_lockObject)
+            {
+                _busyTagSerialDevices = foundDevices;
+                CheckForDeviceChanges();
+            }
+
+            _isScanningForDevices = false;
+            FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
+            return _busyTagSerialDevices;
         }
         catch (Exception ex)
         {
@@ -189,14 +199,7 @@ public class BusyTagManager : IDisposable
         
         return null;
     }
-#else
-    private Task<List<string>?> DiscoverByVidPidWindowsAsync()
-    {
-        _isScanningForDevices = false;
-        return Task.FromResult<List<string>?>(null);
-    }
-#endif
-    
+
     #endregion
     
     #region macOS VID/PID Discovery
@@ -312,13 +315,6 @@ public class BusyTagManager : IDisposable
         {
             // Look for serial devices that might be our BusyTag
             var ports = SerialPort.GetPortNames();
-            
-            // Filter for USB serial devices (usually start with /dev/cu.usbserial or /dev/cu.usbmodem)
-            // var usbPorts = ports.Where(p => 
-            //     p.StartsWith("/dev/cu.usbserial") || 
-            //     p.StartsWith("/dev/cu.usbmodem") ||
-            //     p.StartsWith("/dev/tty.usbserial") ||
-            //     p.StartsWith("/dev/tty.usbmodem")).ToArray();
             
             var usbPorts = ports.Where(p => 
                 p.StartsWith("/dev/tty.usbmodem")).ToArray();
@@ -477,6 +473,64 @@ public class BusyTagManager : IDisposable
         {
             if (EnableVerboseLogging)
                 Console.WriteLine($"[DEBUG] Linux serial port discovery failed: {ex.Message}");
+            _isScanningForDevices = false;
+        }
+
+        return null;
+    }
+
+    #endregion
+
+    #region Fallback AT Command Discovery
+
+    private async Task<List<string>?> FindDeviceByAtCommandAsync()
+    {
+        var foundDevices = new List<string>();
+        
+        try
+        {
+            var ports = SerialPort.GetPortNames();
+            
+            foreach (var port in ports)
+            {
+                try
+                {
+                    using var testPort = new SerialPort(port, 460800);
+                    testPort.ReadTimeout = 2000;
+                    testPort.WriteTimeout = 2000;
+
+                    testPort.Open();
+                    testPort.WriteLine("AT+GDN");
+                    await Task.Delay(100);
+
+                    if (testPort.BytesToRead <= 0) continue;
+                    var response = testPort.ReadExisting();
+                    if (!response.Contains("+DN:busytag-")) continue;
+                    
+                    if (EnableVerboseLogging)
+                        Console.WriteLine($"[INFO] Found BusyTag device on {port} via AT command");
+                    foundDevices.Add(port);
+                }
+                catch
+                {
+                    continue;
+                }
+            }
+
+            lock (_lockObject)
+            {
+                _busyTagSerialDevices = foundDevices;
+                CheckForDeviceChanges();
+            }
+
+            _isScanningForDevices = false;
+            FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
+            return _busyTagSerialDevices;
+        }
+        catch (Exception ex)
+        {
+            if (EnableVerboseLogging)
+                Console.WriteLine($"[DEBUG] AT command discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
