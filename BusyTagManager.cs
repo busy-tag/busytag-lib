@@ -2,9 +2,9 @@
 using System.IO.Ports;
 using System.Runtime.InteropServices;
 
-#if WINDOWS
+// #if WINDOWS
 using System.Management;
-#endif
+// #endif
 
 namespace BusyTag.Lib;
 
@@ -138,14 +138,14 @@ public class BusyTagManager : IDisposable
         }
     }
     
-    private async Task<List<string>?> FindPortByVidPidWindows(string vid, string pid)
+    private List<string>? FindPortByVidPidWindows(string vid, string pid)
     {
         var deviceId = $"VID_{vid}&PID_{pid}";
         var foundDevices = new List<string>();
         
         try
         {
-#if WINDOWS
+// #if WINDOWS
             // Query WMI for USB devices
             const string query = "SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%USB%'";
 
@@ -172,13 +172,13 @@ public class BusyTagManager : IDisposable
                     }
                 }
             }
-#else
-            // If System.Management is not available, fall back to AT command testing
-            if (EnableVerboseLogging)
-                Console.WriteLine("[DEBUG] System.Management not available, falling back to AT command testing");
-            
-            return await FindDeviceByAtCommandAsync();
-#endif
+// #else
+//             // If System.Management is not available, fall back to AT command testing
+//             if (EnableVerboseLogging)
+//                 Console.WriteLine("[DEBUG] System.Management not available, falling back to AT command testing");
+//             
+//             return await FindDeviceByAtCommandAsync();
+// #endif
 
             lock (_lockObject)
             {
