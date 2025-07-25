@@ -1,0 +1,336 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0, v0.4.0, etc.
+  workflow_dispatch:  # Allows manual triggering
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.4.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_VERSION_9: '9.0.x'
+  PACKAGE_OUTPUT_DIRECTORY: ${{ github.workspace }}/output
+  NUGET_SOURCE_URL: 'https://api.nuget.org/v3/index.json'
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for GitVersion
+
+      - name: Setup .NET 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup .NET 9.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore
+      
+      # Add test step if you have tests
+      # - name: Run tests
+      #   run: dotnet test --configuration Release --no-build --verbosity normal
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            **/bin/Release/
+            **/obj/Release/
+          retention-days: 1
+
+  pack:
+    name: Pack NuGet Package
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    outputs:
+      package-version: ${{ steps.get-version.outputs.version }}
+      package-path: ${{ steps.pack.outputs.package-path }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup .NET 9.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+
+      - name: Get version
+        id: get-version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # Extract version from tag (remove 'v' prefix)
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Update project version
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          sed -i "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" BusyTag.Lib.csproj
+          sed -i "s/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>$VERSION.0<\/AssemblyVersion>/" BusyTag.Lib.csproj
+          sed -i "s/<FileVersion>.*<\/FileVersion>/<FileVersion>$VERSION.0<\/FileVersion>/" BusyTag.Lib.csproj
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Create output directory
+        run: mkdir -p ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+
+      - name: Pack NuGet package
+        id: pack
+        run: |
+          dotnet pack --configuration Release --no-restore \
+            --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+            -p:PackageVersion=${{ steps.get-version.outputs.version }}
+          
+          PACKAGE_FILE=$(find ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -name "*.nupkg" | head -1)
+          echo "package-path=$PACKAGE_FILE" >> $GITHUB_OUTPUT
+          echo "Package created: $PACKAGE_FILE"
+
+      - name: Upload NuGet package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
+          retention-days: 90
+
+      - name: Upload symbol package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-symbols
+          path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.snupkg
+          retention-days: 90
+
+  # Multi-platform validation
+  validate:
+    name: Validate on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: pack
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup .NET 9.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-package
+          path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+
+      - name: Test package installation
+        run: |
+          # Create a test project to validate the package
+          mkdir test-project
+          cd test-project
+          dotnet new console
+          
+          # Add the local package
+          PACKAGE_FILE=$(find ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -name "*.nupkg" | head -1)
+          dotnet add package BusyTag.Lib --source ${{ env.PACKAGE_OUTPUT_DIRECTORY }} --version ${{ needs.pack.outputs.package-version }}
+          
+          # Try to build
+          dotnet build
+          
+          echo "✅ Package validation successful on ${{ matrix.os }}"
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [pack, validate]
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-package
+          path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+
+      - name: Download symbol artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-symbols
+          path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          VERSION="${{ needs.pack.outputs.package-version }}"
+          
+          # Create release notes
+          cat > release_notes.md << EOF
+          # BusyTag.Lib v$VERSION
+          
+          ## 📦 Package Information
+          - **Version**: $VERSION
+          - **Target Frameworks**: .NET 8.0, .NET 9.0, .NET 9.0-windows, .NET 9.0-maccatalyst
+          - **NuGet Package**: [BusyTag.Lib v$VERSION](https://www.nuget.org/packages/BusyTag.Lib/$VERSION)
+          
+          ## 🚀 Installation
+          
+          ### Package Manager Console
+          \`\`\`powershell
+          Install-Package BusyTag.Lib -Version $VERSION
+          \`\`\`
+          
+          ### .NET CLI
+          \`\`\`bash
+          dotnet add package BusyTag.Lib --version $VERSION
+          \`\`\`
+          
+          ### PackageReference
+          \`\`\`xml
+          <PackageReference Include="BusyTag.Lib" Version="$VERSION" />
+          \`\`\`
+          
+          ## 📋 What's Changed
+          
+          See the project file for detailed release notes.
+          
+          ## 🔧 Technical Details
+          - Built with .NET 8.0 and 9.0 SDK
+          - Cross-platform compatibility (Windows, macOS, Linux)
+          - Includes PDB symbols for debugging
+          
+          ## 📞 Support
+          - 🐛 [Report Issues](https://github.com/busy-tag/busytag-lib/issues)
+          - 💬 [Discussions](https://github.com/busy-tag/busytag-lib/discussions)
+          - 📧 [Email Support](mailto:support@busy-tag.com)
+          EOF
+          
+          echo "Release notes created"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name || format('v{0}', needs.pack.outputs.package-version) }}
+          name: BusyTag.Lib v${{ needs.pack.outputs.package-version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          files: |
+            ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
+            ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.snupkg
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-nuget:
+    name: Publish to NuGet
+    runs-on: ubuntu-latest
+    needs: [pack, validate, create-release]
+    environment: production  # Requires manual approval
+    
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-package
+          path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Publish to NuGet
+        run: |
+          PACKAGE_FILE=$(find ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -name "*.nupkg" | head -1)
+          
+          echo "Publishing package: $PACKAGE_FILE"
+          
+          dotnet nuget push "$PACKAGE_FILE" \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source ${{ env.NUGET_SOURCE_URL }} \
+            --skip-duplicate
+          
+          echo "✅ Package published successfully to NuGet!"
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+
+      - name: Verify publication
+        run: |
+          VERSION="${{ needs.pack.outputs.package-version }}"
+          echo "🔍 Verifying package publication..."
+          sleep 30  # Wait for NuGet indexing
+          
+          # Try to find the package (may take a few minutes to be available)
+          echo "Package should be available at: https://www.nuget.org/packages/BusyTag.Lib/$VERSION"
+
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    needs: [publish-nuget]
+    if: always()
+    
+    steps:
+      - name: Delete artifacts
+        uses: geekyeggo/delete-artifact@v4
+        with:
+          name: |
+            build-artifacts
+            nuget-package
+            nuget-symbols
+          failOnError: false

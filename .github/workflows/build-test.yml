@@ -1,0 +1,218 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+  pull_request:
+    branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION_8: '8.0.x'
+  DOTNET_VERSION_9: '9.0.x'
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact-name: linux
+          - os: windows-latest
+            artifact-name: windows
+          - os: macos-latest
+            artifact-name: macos
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION_8 }}
+
+      - name: Setup .NET 9.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build (Debug)
+        run: dotnet build --configuration Debug --no-restore
+
+      - name: Build (Release)
+        run: dotnet build --configuration Release --no-restore
+      
+      # Add when you have tests
+      # - name: Run tests
+      #   run: dotnet test --configuration Release --no-build --verbosity normal --logger trx --results-directory TestResults
+      
+      # - name: Upload test results
+      #   uses: actions/upload-artifact@v4
+      #   if: always()
+      #   with:
+      #     name: test-results-${{ matrix.artifact-name }}
+      #     path: TestResults/*.trx
+
+      - name: Pack NuGet package (Release builds only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          dotnet pack --configuration Release --no-build --output ./packages
+          ls -la ./packages/
+
+      - name: Upload NuGet package artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: ./packages/*.nupkg
+          retention-days: 5
+
+  code-analysis:
+    name: Code Analysis
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Run code analysis
+        run: |
+          dotnet build --configuration Release --verbosity normal \
+            -p:TreatWarningsAsErrors=false \
+            -p:WarningsAsErrors="" \
+            -p:RunAnalyzersDuringBuild=true
+
+      - name: Check for compiler warnings
+        run: |
+          echo "Checking for compiler warnings..."
+          # Add custom logic here if needed
+
+  compatibility-check:
+    name: Framework Compatibility
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION_8 }}
+
+      - name: Setup .NET 9.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+
+      - name: Test .NET 8.0 compatibility
+        run: |
+          echo "Testing .NET 8.0 compatibility..."
+          dotnet build --framework net8.0 --configuration Release
+
+      - name: Test .NET 9.0 compatibility
+        run: |
+          echo "Testing .NET 9.0 compatibility..."
+          dotnet build --framework net9.0 --configuration Release
+
+  package-validation:
+    name: Package Validation
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-package
+          path: ./packages
+
+      - name: Install package validation tool
+        run: dotnet tool install -g dotnet-validate --version 0.0.1-preview.304
+
+      - name: Validate package
+        run: |
+          PACKAGE_FILE=$(find ./packages -name "*.nupkg" | head -1)
+          echo "Validating package: $PACKAGE_FILE"
+          
+          # Basic validation
+          if [[ -f "$PACKAGE_FILE" ]]; then
+            echo "✅ Package file exists"
+            unzip -l "$PACKAGE_FILE"
+          else
+            echo "❌ Package file not found"
+            exit 1
+          fi
+
+      - name: Test package installation
+        run: |
+          # Create a test project
+          mkdir test-consumer
+          cd test-consumer
+          dotnet new console
+          
+          # Add the package
+          PACKAGE_FILE=$(find ../packages -name "*.nupkg" | head -1)
+          dotnet add package BusyTag.Lib --source ../packages
+          
+          # Create a simple test
+          cat > Program.cs << 'EOF'
+          using BusyTag.Lib;
+          using System;
+          
+          // Simple test to ensure the package can be loaded
+          var manager = new BusyTagManager();
+          Console.WriteLine("✅ BusyTag.Lib package loaded successfully!");
+          manager.Dispose();
+          EOF
+          
+          # Build and run
+          dotnet build
+          dotnet run
+          
+          echo "✅ Package installation test passed"

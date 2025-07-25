@@ -1,0 +1,188 @@
+name: Update Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New version (e.g., 0.5.0)'
+        required: true
+        type: string
+      create_pr:
+        description: 'Create pull request'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  update-version:
+    name: Update Version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format. Use semantic versioning (e.g., 1.2.3)"
+            exit 1
+          fi
+          echo "✅ Version format is valid: $VERSION"
+
+      - name: Update project file
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          
+          echo "Updating version to $VERSION"
+          
+          # Update BusyTag.Lib.csproj
+          sed -i "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" BusyTag.Lib.csproj
+          sed -i "s/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>$VERSION.0<\/AssemblyVersion>/" BusyTag.Lib.csproj
+          sed -i "s/<FileVersion>.*<\/FileVersion>/<FileVersion>$VERSION.0<\/FileVersion>/" BusyTag.Lib.csproj
+          
+          echo "✅ Project file updated"
+
+      - name: Update README.md
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          
+          # Update version badge in README
+          sed -i "s/BusyTag\.Lib-v[0-9]\+\.[0-9]\+\.[0-9]\+/BusyTag.Lib-v$VERSION/" README.md
+          
+          # Update installation examples
+          sed -i "s/Version=\"[0-9]\+\.[0-9]\+\.[0-9]\+\"/Version=\"$VERSION\"/" README.md
+          sed -i "s/--version [0-9]\+\.[0-9]\+\.[0-9]\+/--version $VERSION/" README.md
+          
+          echo "✅ README.md updated"
+
+      - name: Create changelog entry
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          DATE=$(date +"%Y-%m-%d")
+          
+          # Create or update CHANGELOG.md
+          if [[ ! -f CHANGELOG.md ]]; then
+            cat > CHANGELOG.md << EOF
+          # Changelog
+          
+          All notable changes to this project will be documented in this file.
+          
+          The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+          and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+          
+          ## [Unreleased]
+          
+          ## [$VERSION] - $DATE
+          
+          ### Added
+          - Version $VERSION release
+          
+          ### Changed
+          - Updated project dependencies
+          
+          ### Fixed
+          - Bug fixes and improvements
+          
+          EOF
+          else
+            # Insert new version at the top
+            sed -i "/## \[Unreleased\]/a\\
+          \\
+          ## [$VERSION] - $DATE\\
+          \\
+          ### Added\\
+          - Version $VERSION release\\
+          \\
+          ### Changed\\
+          - Updated project dependencies\\
+          \\
+          ### Fixed\\
+          - Bug fixes and improvements\\
+          " CHANGELOG.md
+          fi
+          
+          echo "✅ Changelog updated"
+
+      - name: Commit changes
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          
+          git add .
+          git commit -m "chore: bump version to $VERSION
+          
+          - Updated project version to $VERSION
+          - Updated README.md with new version
+          - Updated changelog
+          
+          [skip ci]"
+          
+          echo "✅ Changes committed"
+
+      - name: Create pull request
+        if: ${{ github.event.inputs.create_pr == 'true' }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          BRANCH_NAME="version-bump-v$VERSION"
+          
+          # Create and push branch
+          git checkout -b "$BRANCH_NAME"
+          git push origin "$BRANCH_NAME"
+          
+          # Create pull request using GitHub CLI
+          gh pr create \
+            --title "🔖 Version bump to v$VERSION" \
+            --body "## Version Update
+          
+          This PR updates the project version to **v$VERSION**.
+          
+          ### Changes
+          - ✅ Updated \`BusyTag.Lib.csproj\` version tags
+          - ✅ Updated README.md installation examples
+          - ✅ Updated changelog with new version entry
+          
+          ### Next Steps
+          1. Review and merge this PR
+          2. Create a release tag: \`git tag v$VERSION\`
+          3. Push the tag to trigger the release workflow
+          
+          ### Release Command
+          \`\`\`bash
+          git tag v$VERSION
+          git push origin v$VERSION
+          \`\`\`
+          " \
+            --head "$BRANCH_NAME" \
+            --base main
+          
+          echo "✅ Pull request created"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push directly to main
+        if: ${{ github.event.inputs.create_pr == 'false' }}
+        run: |
+          git push origin main
+          echo "✅ Changes pushed directly to main"
+
+      - name: Create release tag
+        if: ${{ github.event.inputs.create_pr == 'false' }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+          
+          echo "✅ Release tag v$VERSION created and pushed"
+          echo "🚀 Release workflow will start automatically"
