@@ -68,7 +68,38 @@ jobs:
           echo "🔧 Installing workloads for ${{ runner.os }}..."
           dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
-      - name: Diagnostic information
+      - name: Diagnostic information (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "🔍 Build Environment Diagnostic" -ForegroundColor Cyan
+          Write-Host "==============================" -ForegroundColor Cyan
+          Write-Host "OS: $($PSVersionTable.OS)"
+          Write-Host "Current directory: $(Get-Location)"
+          Write-Host "Directory contents:"
+          Get-ChildItem -Force
+          Write-Host ""
+          Write-Host ".NET SDK version:"
+          dotnet --version
+          Write-Host ""
+          Write-Host "Available SDKs:"
+          dotnet --list-sdks
+          Write-Host ""
+          Write-Host "Project file check:"
+          if (Test-Path "BusyTag.Lib.csproj") {
+            Write-Host "✅ BusyTag.Lib.csproj found" -ForegroundColor Green
+            Write-Host "Target frameworks:"
+            Select-String -Path "BusyTag.Lib.csproj" -Pattern "TargetFramework" -Context 0,3
+          } else {
+            Write-Host "❌ BusyTag.Lib.csproj not found" -ForegroundColor Red
+          }
+          Write-Host ""
+          Write-Host "Workloads:"
+          try { dotnet workload list } catch { Write-Host "No workloads or command failed" }
+
+      - name: Diagnostic information (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           echo "🔍 Build Environment Diagnostic"
           echo "=============================="
