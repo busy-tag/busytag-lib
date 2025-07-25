@@ -1,9 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <!--        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net9.0-android;net9.0-ios;net9.0-windows10.0.19041.0</TargetFrameworks>-->
-        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('Windows'))">net8.0;net9.0;</TargetFrameworks>
-        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('OSX'))">net8.0;net9.0;net9.0-maccatalyst;</TargetFrameworks>
+        <!-- Simplified target frameworks for better CI compatibility -->
+        <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+
+        <!-- Only add platform-specific frameworks on local development -->
+        <TargetFrameworks Condition="'$(GITHUB_ACTIONS)' != 'true' AND $([MSBuild]::IsOSPlatform('Windows'))">$(TargetFrameworks);net9.0-windows10.0.19041.0</TargetFrameworks>
+        <TargetFrameworks Condition="'$(GITHUB_ACTIONS)' != 'true' AND $([MSBuild]::IsOSPlatform('OSX'))">$(TargetFrameworks);net9.0-maccatalyst</TargetFrameworks>
 
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
@@ -32,7 +35,6 @@
         <PackageReadmeFile>README.md</PackageReadmeFile>
 
         <!-- Legal -->
-        <!--        <PackageLicenseExpression>MIT</PackageLicenseExpression>-->
         <PackageLicenseFile>LICENSE</PackageLicenseFile>
         <Copyright>Copyright © 2025 BUSY TAG SIA</Copyright>
 
@@ -45,15 +47,18 @@
         </PackageReleaseNotes>
 
         <!-- Build Configuration -->
-        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+        <!-- Suppress warnings for missing platform-specific assemblies in CI -->
+        <NoWarn Condition="'$(GITHUB_ACTIONS)' == 'true'">$(NoWarn);NETSDK1206</NoWarn>
     </PropertyGroup>
 
     <!-- Include additional files in package -->
     <ItemGroup>
         <None Include="README.md" Pack="true" PackagePath="\" />
-        <None Include="icon.png" Pack="true" PackagePath="\" />
+        <None Include="icon.png" Pack="true" PackagePath="\" Condition="Exists('icon.png')" />
         <None Include="LICENSE" Pack="true" PackagePath="\" />
     </ItemGroup>
 
@@ -61,16 +66,18 @@
     <ItemGroup>
         <PackageReference Include="System.IO.Ports" Version="9.0.7" />
         <PackageReference Include="System.Text.Json" Version="9.0.7" />
+        <!-- Only include System.Management for .NET standard and Windows targets -->
+        <PackageReference Include="System.Management" Version="8.0.0" Condition="!$(TargetFramework.Contains('maccatalyst'))" />
     </ItemGroup>
 
-    <!-- Windows-specific packages - include for all builds but use conditionally at runtime -->
-    <ItemGroup>
-        <PackageReference Include="System.Management" Version="8.0.0" />
-    </ItemGroup>
-    <ItemGroup>
-      <Content Include=".github\dependabot.yml" />
-      <Content Include=".github\workflows\build-test.yml" />
-      <Content Include=".github\workflows\release.yml" />
-      <Content Include=".github\workflows\version-update.yml" />
-    </ItemGroup>
+    <!-- Platform-specific build conditions -->
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0-windows10.0.19041.0'">
+        <UseWindowsForms>false</UseWindowsForms>
+        <UseWPF>false</UseWPF>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0-maccatalyst'">
+        <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
+    </PropertyGroup>
+
 </Project>
