@@ -43,6 +43,23 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
+      - name: Install required workloads
+        run: |
+          echo "🔧 Installing .NET workloads..."
+          
+          # Try to install workloads, but don't fail the build if it doesn't work
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            echo "🍎 Installing macOS workloads..."
+            dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ macOS workload installation failed, continuing..."
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "🪟 Installing Windows workloads..."
+            dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Windows workload installation failed, continuing..."
+          fi
+          
+          echo "📋 Installed workloads:"
+          dotnet workload list || echo "No workloads available"
+          echo "✅ Workload setup completed"
+
       - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
@@ -166,6 +183,17 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+
+      - name: Install required workloads
+        run: |
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            echo "Installing macOS workloads..."
+            dotnet workload install maccatalyst
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "Installing Windows workloads..."
+            dotnet workload install maccatalyst
+          fi
+          echo "Workload installation completed"
 
       - name: Download package artifact
         uses: actions/download-artifact@v4

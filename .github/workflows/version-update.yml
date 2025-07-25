@@ -27,6 +27,17 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install required workloads
+        run: |
+          echo "Installing required workloads..."
+          dotnet workload install maccatalyst
+          echo "Workload installation completed"
+
       - name: Configure git
         run: |
           git config --local user.email "action@github.com"
