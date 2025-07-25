@@ -68,6 +68,33 @@ jobs:
           echo "🔧 Installing workloads for ${{ runner.os }}..."
           dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
+      - name: Diagnostic information
+        run: |
+          echo "🔍 Build Environment Diagnostic"
+          echo "=============================="
+          echo "OS: $(uname -a)"
+          echo "Current directory: $(pwd)"
+          echo "Directory contents:"
+          ls -la
+          echo ""
+          echo ".NET SDK version:"
+          dotnet --version
+          echo ""
+          echo "Available SDKs:"
+          dotnet --list-sdks
+          echo ""
+          echo "Project file check:"
+          if [[ -f "BusyTag.Lib.csproj" ]]; then
+            echo "✅ BusyTag.Lib.csproj found"
+            echo "Target frameworks:"
+            grep -A 3 "TargetFramework" BusyTag.Lib.csproj || echo "No TargetFramework found"
+          else
+            echo "❌ BusyTag.Lib.csproj not found"
+          fi
+          echo ""
+          echo "Workloads:"
+          dotnet workload list || echo "No workloads or command failed"
+
       - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
@@ -77,13 +104,13 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Restore dependencies
-        run: dotnet restore
+        run: dotnet restore BusyTag.Lib.csproj
 
       - name: Build (Debug)
-        run: dotnet build --configuration Debug --no-restore
+        run: dotnet build BusyTag.Lib.csproj --configuration Debug --no-restore
 
       - name: Build (Release)
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build BusyTag.Lib.csproj --configuration Release --no-restore
       
       # Add when you have tests
       # - name: Run tests
@@ -99,7 +126,7 @@ jobs:
       - name: Pack NuGet package (Release builds only)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          dotnet pack --configuration Release --no-build --output ./packages
+          dotnet pack BusyTag.Lib.csproj --configuration Release --no-build --output ./packages
           ls -la ./packages/
 
       - name: Upload NuGet package artifact
@@ -177,33 +204,24 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
-      - name: Install workloads (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Write-Host "🪟 Installing Windows workloads..."
-          try {
-            dotnet workload install maccatalyst --skip-sign-check
-          } catch {
-            Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
-          }
-
       - name: Install workloads (Unix)
-        if: runner.os != 'Windows'
         shell: bash
         run: |
-          echo "🔧 Installing workloads for ${{ runner.os }}..."
+          echo "🔧 Installing workloads..."
           dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
+
+      - name: Restore dependencies
+        run: dotnet restore BusyTag.Lib.csproj
 
       - name: Test .NET 8.0 compatibility
         run: |
           echo "Testing .NET 8.0 compatibility..."
-          dotnet build --framework net8.0 --configuration Release
+          dotnet build BusyTag.Lib.csproj --framework net8.0 --configuration Release --no-restore
 
       - name: Test .NET 9.0 compatibility
         run: |
           echo "Testing .NET 9.0 compatibility..."
-          dotnet build --framework net9.0 --configuration Release
+          dotnet build BusyTag.Lib.csproj --framework net9.0 --configuration Release --no-restore
 
   package-validation:
     name: Package Validation

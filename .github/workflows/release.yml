@@ -85,10 +85,10 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Restore dependencies
-        run: dotnet restore
+        run: dotnet restore BusyTag.Lib.csproj
 
       - name: Build solution
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build BusyTag.Lib.csproj --configuration Release --no-restore
       
       # Add test step if you have tests
       # - name: Run tests
