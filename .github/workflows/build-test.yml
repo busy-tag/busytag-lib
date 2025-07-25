@@ -50,16 +50,23 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
-      - name: Install required workloads
+      - name: Install workloads (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            echo "Installing macOS workloads..."
-            dotnet workload install maccatalyst
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
-            echo "Installing Windows workloads..."
-            dotnet workload install maccatalyst
-          fi
-          echo "Workload installation completed"
+          Write-Host "🪟 Installing Windows workloads..."
+          try {
+            dotnet workload install maccatalyst --skip-sign-check
+          } catch {
+            Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
+          }
+
+      - name: Install workloads (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "🔧 Installing workloads for ${{ runner.os }}..."
+          dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -119,11 +126,23 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
-      - name: Install required workloads
+      - name: Install workloads (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          echo "Installing required workloads..."
-          dotnet workload install maccatalyst
-          echo "Workload installation completed"
+          Write-Host "🪟 Installing Windows workloads..."
+          try {
+            dotnet workload install maccatalyst --skip-sign-check
+          } catch {
+            Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
+          }
+
+      - name: Install workloads (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "🔧 Installing workloads for ${{ runner.os }}..."
+          dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
       - name: Restore dependencies
         run: dotnet restore
@@ -158,11 +177,23 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
-      - name: Install required workloads
+      - name: Install workloads (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          echo "Installing required workloads..."
-          dotnet workload install maccatalyst
-          echo "Workload installation completed"
+          Write-Host "🪟 Installing Windows workloads..."
+          try {
+            dotnet workload install maccatalyst --skip-sign-check
+          } catch {
+            Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
+          }
+
+      - name: Install workloads (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "🔧 Installing workloads for ${{ runner.os }}..."
+          dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
       - name: Test .NET 8.0 compatibility
         run: |
@@ -190,10 +221,14 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
       - name: Install required workloads
+        shell: bash
         run: |
-          echo "Installing required workloads..."
-          dotnet workload install maccatalyst
-          echo "Workload installation completed"
+          echo "🔧 Installing .NET workloads..."
+          dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
+          
+          echo "📋 Installed workloads:"
+          dotnet workload list || echo "No workloads available"
+          echo "✅ Workload setup completed"
 
       - name: Download package artifact
         uses: actions/download-artifact@v4

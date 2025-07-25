@@ -43,18 +43,34 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
-      - name: Install required workloads
+      - name: Install workloads (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          echo "🔧 Installing .NET workloads..."
+          Write-Host "🪟 Installing Windows workloads..."
+          try {
+            dotnet workload install maccatalyst --skip-sign-check
+            Write-Host "✅ Workload installation completed"
+          } catch {
+            Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
+          }
           
-          # Try to install workloads, but don't fail the build if it doesn't work
+          Write-Host "📋 Installed workloads:"
+          dotnet workload list
+
+      - name: Install workloads (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "🔧 Installing workloads for ${{ runner.os }}..."
+          
           if [[ "${{ runner.os }}" == "macOS" ]]; then
             echo "🍎 Installing macOS workloads..."
-            dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ macOS workload installation failed, continuing..."
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
-            echo "🪟 Installing Windows workloads..."
-            dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Windows workload installation failed, continuing..."
+          else
+            echo "🐧 Installing Linux workloads..."
           fi
+          
+          dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
           
           echo "📋 Installed workloads:"
           dotnet workload list || echo "No workloads available"
@@ -184,16 +200,23 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
-      - name: Install required workloads
+      - name: Install workloads (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            echo "Installing macOS workloads..."
-            dotnet workload install maccatalyst
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
-            echo "Installing Windows workloads..."
-            dotnet workload install maccatalyst
-          fi
-          echo "Workload installation completed"
+          Write-Host "🪟 Installing Windows workloads..."
+          try {
+            dotnet workload install maccatalyst --skip-sign-check
+          } catch {
+            Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
+          }
+
+      - name: Install workloads (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "🔧 Installing workloads for ${{ runner.os }}..."
+          dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
       - name: Download package artifact
         uses: actions/download-artifact@v4

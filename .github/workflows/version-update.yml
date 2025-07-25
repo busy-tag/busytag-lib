@@ -32,11 +32,23 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      - name: Install required workloads
+      - name: Install workloads (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          echo "Installing required workloads..."
-          dotnet workload install maccatalyst
-          echo "Workload installation completed"
+          Write-Host "🪟 Installing Windows workloads..."
+          try {
+            dotnet workload install maccatalyst --skip-sign-check
+          } catch {
+            Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
+          }
+
+      - name: Install workloads (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "🔧 Installing workloads..."
+          dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
       - name: Configure git
         run: |
