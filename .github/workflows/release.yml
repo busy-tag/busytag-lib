@@ -114,6 +114,8 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+          cache: false  # Disable caching since you don't have a lock file
+        timeout-minutes: 10
 
       - name: Install workloads
         shell: bash
@@ -149,13 +151,18 @@ jobs:
       - name: Pack NuGet package
         id: pack
         run: |
-          dotnet pack --configuration Release --no-restore \
+          # Ensure we're building for multiple target frameworks
+          dotnet pack BusyTag.Lib.csproj --configuration Release \
             --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
             -p:PackageVersion=${{ steps.get-version.outputs.version }}
           
           PACKAGE_FILE=$(find ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -name "*.nupkg" | head -1)
           echo "package-path=$PACKAGE_FILE" >> $GITHUB_OUTPUT
           echo "Package created: $PACKAGE_FILE"
+          
+          # Inspect the package contents
+          echo "Package contents:"
+          unzip -l "$PACKAGE_FILE"
 
       - name: Upload NuGet package artifact
         uses: actions/upload-artifact@v4
@@ -235,21 +242,16 @@ jobs:
           path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
 
       - name: Test package installation
+        shell: bash
         run: |
           # Create a test project to validate the package
-          mkdir test-project
+          mkdir -p test-project
           cd test-project
           
           # Create a console app with net8.0 which should be compatible
           dotnet new console -f net8.0
           
-          # If on Windows, update to target Windows specifically if needed
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            echo "Adjusting project for Windows..."
-            dotnet new globaljson --sdk-version 9.0.0
-          fi
-          
-          # Create a NuGet.config to use both sources
+          # Create a NuGet.config file to use both local and NuGet.org sources
           cat > NuGet.config << EOF
           <?xml version="1.0" encoding="utf-8"?>
           <configuration>
@@ -261,14 +263,34 @@ jobs:
           </configuration>
           EOF
           
-          # Add the package with explicit version
-          dotnet add package BusyTag.Lib --version ${{ needs.pack.outputs.package-version }}
+          # List package directory contents to verify the package is there
+          echo "Package directory contents:"
+          ls -la ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+          
+          # Find the package version
+          PACKAGE_VERSION=$(find ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -name "*.nupkg" | sed -E 's/.*BusyTag\.Lib\.([0-9]+\.[0-9]+\.[0-9]+)\.nupkg/\1/g')
+          echo "Found package version: ${PACKAGE_VERSION:-${{ needs.pack.outputs.package-version }}}"
+          
+          # Add the package using both sources
+          dotnet add package BusyTag.Lib --version ${PACKAGE_VERSION:-${{ needs.pack.outputs.package-version }}}
           
           # Show the resulting project file
           cat *.csproj
           
+          # Add basic test code
+          cat > Program.cs << 'EOF'
+          // See https://aka.ms/new-console-template for more information
+          using System;
+          
+          Console.WriteLine("Testing BusyTag.Lib package reference");
+          
+          // Just reference a type from the package to verify it loads
+          var type = typeof(BusyTag.Lib.BusyTagManager);
+          Console.WriteLine($"Successfully loaded: {type.FullName}");
+          EOF
+          
           # Try to build
-          dotnet build -v detailed
+          dotnet build
           
           echo "✅ Package validation successful on ${{ matrix.os }}"
 
