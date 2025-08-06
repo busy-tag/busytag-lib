@@ -214,11 +214,12 @@ jobs:
           # Create a test project to validate the package
           mkdir test-project
           cd test-project
+          
+          # Create a console app targeting the same frameworks as your library
           dotnet new console
           
-          # Add the local package
-          PACKAGE_FILE=$(find ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -name "*.nupkg" | head -1)
-          dotnet add package BusyTag.Lib --source ${{ env.PACKAGE_OUTPUT_DIRECTORY }} --version ${{ needs.pack.outputs.package-version }}
+          # Add the NuGet.org source alongside the local package source
+          dotnet add package BusyTag.Lib --source ${{ env.PACKAGE_OUTPUT_DIRECTORY }} --version ${{ needs.pack.outputs.package-version }} --source https://api.nuget.org/v3/index.json
           
           # Try to build
           dotnet build
