@@ -114,7 +114,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
-          cache: false  # Disable caching since you don't have a lock file
         timeout-minutes: 10
 
       - name: Install workloads
