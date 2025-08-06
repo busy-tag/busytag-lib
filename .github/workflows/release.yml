@@ -42,6 +42,17 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+          cache: true  # Enable caching to avoid repeated downloads
+        continue-on-error: false  # Make this a hard failure so we know if it's not working
+        timeout-minutes: 10  # Add a reasonable timeout
+
+      - name: Verify .NET SDKs
+        run: |
+          echo "Installed .NET SDKs:"
+          dotnet --list-sdks
+          
+          echo "Verifying .NET 9.0 installation:"
+          dotnet --version
 
       - name: Install workloads
         shell: bash
@@ -160,6 +171,20 @@ jobs:
           path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.snupkg
           retention-days: 90
 
+      - name: Environment diagnostics
+        run: |
+          echo "OS information:"
+          uname -a || ver
+          
+          echo "Directory structure:"
+          ls -la || dir
+          
+          echo "Package output directory contents:"
+          ls -la ${{ env.PACKAGE_OUTPUT_DIRECTORY }} || dir ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+          
+          echo "Package file details:"
+          find ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -name "*.nupkg" | xargs -I{} ls -la {} || dir /s ${{ env.PACKAGE_OUTPUT_DIRECTORY }}\*.nupkg
+
   # Multi-platform validation (Linux excluded)
   validate:
     name: Validate on ${{ matrix.os }}
@@ -215,14 +240,35 @@ jobs:
           mkdir test-project
           cd test-project
           
-          # Create a console app targeting the same frameworks as your library
-          dotnet new console
+          # Create a console app with net8.0 which should be compatible
+          dotnet new console -f net8.0
           
-          # Add the NuGet.org source alongside the local package source
-          dotnet add package BusyTag.Lib --source ${{ env.PACKAGE_OUTPUT_DIRECTORY }} --version ${{ needs.pack.outputs.package-version }} --source https://api.nuget.org/v3/index.json
+          # If on Windows, update to target Windows specifically if needed
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "Adjusting project for Windows..."
+            dotnet new globaljson --sdk-version 9.0.0
+          fi
+          
+          # Create a NuGet.config to use both sources
+          cat > NuGet.config << EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local" value="${{ env.PACKAGE_OUTPUT_DIRECTORY }}" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+          </configuration>
+          EOF
+          
+          # Add the package with explicit version
+          dotnet add package BusyTag.Lib --version ${{ needs.pack.outputs.package-version }}
+          
+          # Show the resulting project file
+          cat *.csproj
           
           # Try to build
-          dotnet build
+          dotnet build -v detailed
           
           echo "✅ Package validation successful on ${{ matrix.os }}"
 
