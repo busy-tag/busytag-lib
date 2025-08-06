@@ -42,7 +42,7 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
-          cache: true  # Enable caching to avoid repeated downloads
+#          cache: true  # Enable caching to avoid repeated downloads
         continue-on-error: false  # Make this a hard failure so we know if it's not working
         timeout-minutes: 10  # Add a reasonable timeout
 
