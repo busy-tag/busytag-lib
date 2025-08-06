@@ -10,7 +10,7 @@ A powerful and intuitive .NET library for seamless BusyTag device management via
 
 ## 🚀 Key Features
 
-- **🔍 Cross-platform device discovery** - Automatic detection on Windows, macOS, and Linux (not fully tested)
+- **🔍 Cross-platform device discovery** - Automatic detection on Windows, macOS, and Linux
 - **📡 Robust serial communication** - Reliable connection management with automatic reconnection
 - **📁 Complete file management** - Upload, download, and delete files with real-time progress tracking
 - **💡 Advanced LED control** - Solid colors, custom patterns, and predefined animations
@@ -33,7 +33,7 @@ dotnet add package BusyTag.Lib
 
 ### PackageReference
 ```xml
-<PackageReference Include="BusyTag.Lib" Version="0.3.0" />
+<PackageReference Include="BusyTag.Lib" Version="0.5.1" />
 ```
 
 ## 🏃‍♂️ Quick Start
@@ -435,14 +435,14 @@ device.ReceivedUsbMassStorageActive += (sender, isActive) =>
 - **Port Format**: `/dev/tty.usbmodem-xxx`
 - **Requirements**: Xcode command line tools
 - **Permissions**: May require accessibility permissions for serial access
-- **Tested on**: macOS 10.15+ (Catalina and newer)
+- **Tested on**: macOS 10.15+ (Catalina and newer), fully tested on macOS 14+
 
 ### Linux
 - **Device Discovery**: `lsusb` command-line tool + AT command validation
 - **Port Format**: `/dev/ttyUSB0`, `/dev/ttyACM0`, etc.
 - **Requirements**: `usbutils` package
 - **Permissions**: User must be in `dialout` group: `sudo usermod -a -G dialout $USER`
-- **Not fully tested**
+- **Tested on**: Ubuntu 20.04+ (Limited testing)
 
 ## 🎨 Available LED Patterns
 
@@ -639,9 +639,9 @@ public async Task HandleFirmwareVersions(BusyTagDevice device)
 
 - **.NET Runtime**: 8.0 or 9.0
 - **Operating Systems**:
-    - Windows 10 version 1903 or later
-    - macOS 10.15 (Catalina) or later
-    - Linux with kernel 4.0 or later
+  - Windows 10 version 1903 or later (Windows 10/11 fully supported)
+  - macOS 10.15 (Catalina) or later (macOS 14+ fully tested)
+  - Linux with kernel 4.0 or later (Ubuntu 20.04+ recommended)
 - **Hardware**: BusyTag device with compatible firmware (v0.7+)
 - **Permissions**: Serial port access rights
 - **Dependencies**: See table below
@@ -743,6 +743,8 @@ device.FileUploadFinished += (sender, result) =>
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 🛠️ Development
+
 ### Development Setup
 ```bash
 # Clone the repository
@@ -767,11 +769,31 @@ dotnet test
 
 ## 🔄 Changelog
 
-### v0.3.0 (Current)
-- 🔧 Little project configuration update
+### v0.5.1 (Current)
+- 🔧 Little fix for SendCommandAsync() method
+- 🐛 Improved command handling reliability
+- 📡 Enhanced serial communication stability
+
+### v0.5.0
+- ✨ Enhanced SendCommandAsync implementation
+- 📡 Better serial communication stability
+- 🔧 Improved response handling for AT commands
+- 🚀 Performance optimizations for file transfers
+
+### v0.4.0
+- 🚀 Added support for .NET 9.0
+- 📦 Updated dependencies to latest versions (System.IO.Ports 9.0.7, System.Text.Json 9.0.7)
+- 🔧 Improved cross-platform compatibility
+
+### v0.3.0
+- 🔧 Project configuration updates
+- 📱 Better support for Mac Catalyst builds
+- 🏗️ Improved build system for multi-platform targets
 
 ### v0.2.3
 - 📚 Updated documentation and examples
+- 🔍 Added more detailed usage examples
+- 📋 Improved API documentation
 
 ### v0.2.2
 - ✨ Enhanced device discovery reliability

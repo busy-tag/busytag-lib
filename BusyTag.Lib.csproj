@@ -43,7 +43,7 @@
 
         <!-- Release Notes -->
         <PackageReleaseNotes>
-            v0.5.0 - Removed compile if statements.
+            v0.5.1 - Little fix for SendCommandAsync().
         </PackageReleaseNotes>
 
         <!-- Build Configuration -->

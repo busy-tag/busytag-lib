@@ -196,11 +196,11 @@ public class BusyTagDevice(string? portName)
     private Task<string> SendCommandAsync(string command, int timeoutMs = 150, bool waitForFirstResponse = true,
         bool discardInBuffer = true)
     {
-        if(_asyncCommandActive || _writeRawData) return Task.FromResult<string>(null);
+        if(_asyncCommandActive || _writeRawData) return Task.FromResult(string.Empty);
         if (!IsConnected)
         {
             Disconnect();
-            return Task.FromResult<string>(null);
+            return Task.FromResult(string.Empty);
         }
 
         try
@@ -322,7 +322,7 @@ public class BusyTagDevice(string? portName)
                 }
                 catch (Exception ex)
                 {
-                    Trace.WriteLine($"[SENDBYTES] Exception: {ex.Message}");
+                    Trace.WriteLine($"[SEND BYTES] Exception: {ex.Message}");
                     throw new InvalidOperationException($"Binary operation failed: {ex.Message}", ex);
                     // result = [];
                 }
@@ -880,7 +880,6 @@ public class BusyTagDevice(string? portName)
 
     private DriveInfo? FindBusyTagDrive()
     {
-        if (LocalHostAddress == null) return null;
         var allDrives = DriveInfo.GetDrives();
         foreach (var d in allDrives)
         {
