@@ -42,7 +42,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
-#          cache: true  # Enable caching to avoid repeated downloads
         continue-on-error: false  # Make this a hard failure so we know if it's not working
         timeout-minutes: 10  # Add a reasonable timeout
 
@@ -250,13 +249,23 @@ jobs:
           # Create a console app with net8.0 which should be compatible
           dotnet new console -f net8.0
           
+          # Handle path differences between Windows and Unix
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            OUTPUT_DIR="${{ github.workspace }}\output"
+            OUTPUT_DIR_NORMALIZED=$(echo "$OUTPUT_DIR" | sed 's|\\|/|g')
+          else
+            OUTPUT_DIR_NORMALIZED="${{ env.PACKAGE_OUTPUT_DIRECTORY }}"
+          fi
+          
+          echo "Using output directory: $OUTPUT_DIR_NORMALIZED"
+          
           # Create a NuGet.config file to use both local and NuGet.org sources
           cat > NuGet.config << EOF
           <?xml version="1.0" encoding="utf-8"?>
           <configuration>
             <packageSources>
               <clear />
-              <add key="local" value="${{ env.PACKAGE_OUTPUT_DIRECTORY }}" />
+              <add key="local" value="$OUTPUT_DIR_NORMALIZED" />
               <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
             </packageSources>
           </configuration>
@@ -264,16 +273,32 @@ jobs:
           
           # List package directory contents to verify the package is there
           echo "Package directory contents:"
-          ls -la ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+          ls -la "$OUTPUT_DIR_NORMALIZED" || {
+            echo "Directory not found, checking workspace contents:"
+            ls -la "${{ github.workspace }}"
+            echo "Looking for output directory in workspace:"
+            find "${{ github.workspace }}" -name "output" -type d 2>/dev/null || echo "No output directory found"
+            echo "Looking for .nupkg files:"
+            find "${{ github.workspace }}" -name "*.nupkg" 2>/dev/null || echo "No .nupkg files found"
+            exit 1
+          }
           
-          # Find the package version
-          PACKAGE_VERSION=$(find ${{ env.PACKAGE_OUTPUT_DIRECTORY }} -name "*.nupkg" | sed -E 's/.*BusyTag\.Lib\.([0-9]+\.[0-9]+\.[0-9]+)\.nupkg/\1/g')
-          echo "Found package version: ${PACKAGE_VERSION:-${{ needs.pack.outputs.package-version }}}"
+          # Find the package version from the actual package file
+          PACKAGE_FILE=$(find "$OUTPUT_DIR_NORMALIZED" -name "*.nupkg" | head -1)
+          if [[ -z "$PACKAGE_FILE" ]]; then
+            echo "❌ No .nupkg file found in $OUTPUT_DIR_NORMALIZED"
+            exit 1
+          fi
           
-          # Add the package using both sources
-          dotnet add package BusyTag.Lib --version ${PACKAGE_VERSION:-${{ needs.pack.outputs.package-version }}}
+          echo "Found package file: $PACKAGE_FILE"
+          PACKAGE_VERSION=$(basename "$PACKAGE_FILE" | sed -E 's/.*BusyTag\.Lib\.([0-9]+\.[0-9]+\.[0-9]+)\.nupkg/\1/')
+          echo "Extracted package version: $PACKAGE_VERSION"
+          
+          # Add the package using explicit version
+          dotnet add package BusyTag.Lib --version "$PACKAGE_VERSION"
           
           # Show the resulting project file
+          echo "Project file contents:"
           cat *.csproj
           
           # Add basic test code
@@ -288,8 +313,13 @@ jobs:
           Console.WriteLine($"Successfully loaded: {type.FullName}");
           EOF
           
+          # Show NuGet config for debugging
+          echo "NuGet.config contents:"
+          cat NuGet.config
+          
           # Try to build
-          dotnet build
+          echo "Building test project..."
+          dotnet build --verbosity normal
           
           echo "✅ Package validation successful on ${{ matrix.os }}"
 
