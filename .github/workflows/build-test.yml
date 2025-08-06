@@ -25,10 +25,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Linux support temporarily disabled - not fully tested
+        # os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
         include:
-          - os: ubuntu-latest
-            artifact-name: linux
+          # - os: ubuntu-latest
+          #   artifact-name: linux
           - os: windows-latest
             artifact-name: windows
           - os: macos-latest
@@ -61,11 +63,11 @@ jobs:
             Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
           }
 
-      - name: Install workloads (Unix)
-        if: runner.os != 'Windows'
+      - name: Install workloads (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          echo "🔧 Installing workloads for ${{ runner.os }}..."
+          echo "🔧 Installing workloads for macOS..."
           dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
       - name: Diagnostic information (Windows)
@@ -97,8 +99,8 @@ jobs:
           Write-Host "Workloads:"
           try { dotnet workload list } catch { Write-Host "No workloads or command failed" }
 
-      - name: Diagnostic information (Unix)
-        if: runner.os != 'Windows'
+      - name: Diagnostic information (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: |
           echo "🔍 Build Environment Diagnostic"
@@ -154,14 +156,14 @@ jobs:
       #     name: test-results-${{ matrix.artifact-name }}
       #     path: TestResults/*.trx
 
-      - name: Pack NuGet package (Release builds only)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Pack NuGet package (Windows only for cross-platform package)
+        if: matrix.os == 'windows-latest'
         run: |
           dotnet pack BusyTag.Lib.csproj --configuration Release --no-build --output ./packages
-          ls -la ./packages/
+          dir ./packages/
 
       - name: Upload NuGet package artifact
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: nuget-package
@@ -170,7 +172,7 @@ jobs:
 
   code-analysis:
     name: Code Analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Keep ubuntu for CI tasks (no device access needed)
     if: github.event_name == 'pull_request'
     
     steps:
@@ -184,22 +186,10 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
-      - name: Install workloads (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Write-Host "🪟 Installing Windows workloads..."
-          try {
-            dotnet workload install maccatalyst --skip-sign-check
-          } catch {
-            Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
-          }
-
-      - name: Install workloads (Unix)
-        if: runner.os != 'Windows'
+      - name: Install workloads
         shell: bash
         run: |
-          echo "🔧 Installing workloads for ${{ runner.os }}..."
+          echo "🔧 Installing workloads..."
           dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
       - name: Restore dependencies
@@ -219,7 +209,7 @@ jobs:
 
   compatibility-check:
     name: Framework Compatibility
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Keep ubuntu for build checks (no device access needed)
     
     steps:
       - name: Checkout repository
@@ -235,7 +225,7 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
-      - name: Install workloads (Unix)
+      - name: Install workloads
         shell: bash
         run: |
           echo "🔧 Installing workloads..."
@@ -256,7 +246,7 @@ jobs:
 
   package-validation:
     name: Package Validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Keep ubuntu for package operations (no device access needed)
     needs: build
     if: github.event_name == 'pull_request'
     
@@ -321,6 +311,7 @@ jobs:
           // Simple test to ensure the package can be loaded
           var manager = new BusyTagManager();
           Console.WriteLine("✅ BusyTag.Lib package loaded successfully!");
+          Console.WriteLine($"Experimental Linux support: {manager.EnableExperimentalLinuxSupport}");
           manager.Dispose();
           EOF
           

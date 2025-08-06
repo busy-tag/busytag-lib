@@ -15,18 +15,18 @@
 
         <!-- NuGet Package Information -->
         <PackageId>BusyTag.Lib</PackageId>
-        <Version>0.5.1</Version>
-        <AssemblyVersion>0.5.1.0</AssemblyVersion>
-        <FileVersion>0.5.1.0</FileVersion>
+        <Version>0.5.2</Version>
+        <AssemblyVersion>0.5.2.0</AssemblyVersion>
+        <FileVersion>0.5.2.0</FileVersion>
 
         <!-- Package Metadata -->
         <Title>BusyTag Device Management Library</Title>
         <Authors>BUSY TAG SIA</Authors>
         <Company>BUSY TAG SIA</Company>
         <Product>Busy Tag</Product>
-        <Description>A comprehensive library for managing Busy Tag devices via serial communication. Supports device discovery, file management, LED control, and pattern configuration.</Description>
-        <Summary>Library for Busy Tag device management and control</Summary>
-        <PackageTags>busytag;serial;device;led;iot;hardware</PackageTags>
+        <Description>A comprehensive library for managing Busy Tag devices via serial communication on Windows and macOS. Supports device discovery, file management, LED control, and pattern configuration.</Description>
+        <Summary>Library for Busy Tag device management and control on Windows and macOS</Summary>
+        <PackageTags>busytag;serial;device;led;iot;hardware;windows;macos</PackageTags>
 
         <!-- URLs and Links -->
         <PackageProjectUrl>https://github.com/busy-tag/busytag-lib</PackageProjectUrl>
@@ -43,6 +43,7 @@
 
         <!-- Release Notes -->
         <PackageReleaseNotes>
+            v0.5.2 - Linux support temporarily disabled pending further testing. Improved platform detection and stability for Windows and macOS.
             v0.5.1 - Little fix for SendCommandAsync().
         </PackageReleaseNotes>
 

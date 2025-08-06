@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'  # Triggers on version tags like v1.0.0, v0.4.0, etc.
+      - 'v*'  # Triggers on version tags like v1.0.0, v0.5.2, etc.
   workflow_dispatch:  # Allows manual triggering
     inputs:
       version:
-        description: 'Version to release (e.g., 0.4.0)'
+        description: 'Version to release (e.g., 0.5.2)'
         required: true
         type: string
       prerelease:
@@ -25,7 +25,7 @@ env:
 jobs:
   build-and-test:
     name: Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Keep ubuntu for CI operations (no device access needed)
     
     steps:
       - name: Checkout repository
@@ -43,33 +43,10 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
 
-      - name: Install workloads (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Write-Host "🪟 Installing Windows workloads..."
-          try {
-            dotnet workload install maccatalyst --skip-sign-check
-            Write-Host "✅ Workload installation completed"
-          } catch {
-            Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
-          }
-          
-          Write-Host "📋 Installed workloads:"
-          dotnet workload list
-
-      - name: Install workloads (Unix)
-        if: runner.os != 'Windows'
+      - name: Install workloads
         shell: bash
         run: |
-          echo "🔧 Installing workloads for ${{ runner.os }}..."
-          
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            echo "🍎 Installing macOS workloads..."
-          else
-            echo "🐧 Installing Linux workloads..."
-          fi
-          
+          echo "🔧 Installing workloads..."
           dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
           
           echo "📋 Installed workloads:"
@@ -105,7 +82,7 @@ jobs:
 
   pack:
     name: Pack NuGet Package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Keep ubuntu for packaging (no device access needed)
     needs: build-and-test
     outputs:
       package-version: ${{ steps.get-version.outputs.version }}
@@ -126,6 +103,12 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION_9 }}
+
+      - name: Install workloads
+        shell: bash
+        run: |
+          echo "🔧 Installing workloads..."
+          dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
       - name: Get version
         id: get-version
@@ -177,14 +160,16 @@ jobs:
           path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.snupkg
           retention-days: 90
 
-  # Multi-platform validation
+  # Multi-platform validation (Linux excluded)
   validate:
     name: Validate on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: pack
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Linux validation temporarily disabled - not fully tested
+        # os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
     
     steps:
       - name: Checkout repository
@@ -211,11 +196,11 @@ jobs:
             Write-Host "⚠️ Workload installation failed, continuing..." -ForegroundColor Yellow
           }
 
-      - name: Install workloads (Unix)
-        if: runner.os != 'Windows'
+      - name: Install workloads (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          echo "🔧 Installing workloads for ${{ runner.os }}..."
+          echo "🔧 Installing workloads for macOS..."
           dotnet workload install maccatalyst --skip-sign-check || echo "⚠️ Workload installation failed, continuing..."
 
       - name: Download package artifact
@@ -242,7 +227,7 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Keep ubuntu for release creation (no device access needed)
     needs: [pack, validate]
     permissions:
       contents: write
@@ -277,6 +262,7 @@ jobs:
           ## 📦 Package Information
           - **Version**: $VERSION
           - **Target Frameworks**: .NET 8.0, .NET 9.0, .NET 9.0-windows, .NET 9.0-maccatalyst
+          - **Platform Support**: Windows and macOS (Linux support coming soon)
           - **NuGet Package**: [BusyTag.Lib v$VERSION](https://www.nuget.org/packages/BusyTag.Lib/$VERSION)
           
           ## 🚀 Installation
@@ -296,13 +282,24 @@ jobs:
           <PackageReference Include="BusyTag.Lib" Version="$VERSION" />
           \`\`\`
           
-          ## 📋 What's Changed
+          ## 📋 What's Changed in v0.5.2
           
-          See the project file for detailed release notes.
+          - **Platform Support**: Linux support temporarily disabled pending further testing
+          - **Stability**: Improved platform detection for Windows and macOS
+          - **Feature Flag**: Added \`EnableExperimentalLinuxSupport\` flag for future Linux testing
+          - **Documentation**: Updated to reflect current platform support status
+          
+          ## ⚠️ Important Notes
+          
+          - Linux support is temporarily disabled but code remains in place for future enablement
+          - To experiment with Linux support (not recommended for production):
+            \`\`\`csharp
+            manager.EnableExperimentalLinuxSupport = true;
+            \`\`\`
           
           ## 🔧 Technical Details
           - Built with .NET 8.0 and 9.0 SDK
-          - Cross-platform compatibility (Windows, macOS, Linux)
+          - Cross-platform compatibility (Windows, macOS)
           - Includes PDB symbols for debugging
           
           ## 📞 Support
@@ -330,7 +327,7 @@ jobs:
 
   publish-nuget:
     name: Publish to NuGet
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Keep ubuntu for publishing (no device access needed)
     needs: [pack, validate, create-release]
     environment: production  # Requires manual approval
     

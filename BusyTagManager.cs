@@ -24,6 +24,9 @@ public class BusyTagManager : IDisposable
 
     // Add this property to control logging verbosity
     public bool EnableVerboseLogging { get; set; } = false;
+    
+    // Add this property to control Linux support (disabled by default)
+    public bool EnableExperimentalLinuxSupport { get; set; } = false;
 
     public string[] AllSerialPorts()
     {
@@ -81,9 +84,16 @@ public class BusyTagManager : IDisposable
         {
             return await DiscoverByVidPidMacOsAsync();
         }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && EnableExperimentalLinuxSupport)
+        {
+            if (EnableVerboseLogging)
+                Console.WriteLine("[WARNING] Linux support is experimental and not fully tested");
+            return await DiscoverByVidPidLinuxAsync();
+        }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            return await DiscoverByVidPidLinuxAsync();
+            if (EnableVerboseLogging)
+                Console.WriteLine("[INFO] Linux platform detected but support is disabled. Set EnableExperimentalLinuxSupport = true to enable experimental support.");
         }
         
         _isScanningForDevices = false;
@@ -367,7 +377,10 @@ public class BusyTagManager : IDisposable
 
     #endregion
 
-    #region Linux VID/PID Discovery
+    #region Linux VID/PID Discovery - EXPERIMENTAL (Disabled by default)
+
+    // Linux support is experimental and not fully tested
+    // Enable by setting EnableExperimentalLinuxSupport = true
 
     private async Task<List<string>?> DiscoverByVidPidLinuxAsync()
     {
