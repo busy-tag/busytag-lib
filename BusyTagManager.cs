@@ -352,7 +352,7 @@ public class BusyTagManager : IDisposable
             var ports = SerialPort.GetPortNames();
 
             var usbPorts = ports.Where(p =>
-                p.StartsWith("/dev/tty.usbmodem")).ToArray();
+                p.StartsWith("/dev/cu.usbmodem")).ToArray();
 
             // Add all USB modem ports since we already confirmed the USB device exists
             // Don't try to communicate with them as they might already be in use

@@ -23,17 +23,17 @@ A powerful and intuitive .NET library for seamless BusyTag device management via
 
 ### Package Manager Console
 ```powershell
-Install-Package BusyTag.Lib -Version 0.5.2
+Install-Package BusyTag.Lib -Version 0.5.3
 ```
 
 ### .NET CLI
 ```bash
-dotnet add package BusyTag.Lib --version 0.5.2
+dotnet add package BusyTag.Lib --version 0.5.3
 ```
 
 ### PackageReference
 ```xml
-<PackageReference Include="BusyTag.Lib" Version="0.5.2" />
+<PackageReference Include="BusyTag.Lib" Version="0.5.3" />
 ```
 
 ## 🖥️ Platform Support
@@ -120,7 +120,13 @@ if (devices?.Any() == true)
 
 ## 🔄 Changelog
 
-### v0.5.2 (Current)
+### v0.5.3 (Current)
+- 🔧 Library updates and improvements
+- 🐛 Fixed issue for device finding on newest macOS version
+- 📚 Enhanced macOS compatibility and device detection
+- ✨ Performance improvements and stability enhancements
+
+### v0.5.2
 - 🔧 Linux support temporarily disabled pending further testing
 - ✨ Added `EnableExperimentalLinuxSupport` flag for future Linux testing
 - 📚 Improved platform detection and stability for Windows and macOS

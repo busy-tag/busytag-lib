@@ -15,9 +15,9 @@
 
         <!-- NuGet Package Information -->
         <PackageId>BusyTag.Lib</PackageId>
-        <Version>0.5.2</Version>
-        <AssemblyVersion>0.5.2.0</AssemblyVersion>
-        <FileVersion>0.5.2.0</FileVersion>
+        <Version>0.5.3</Version>
+        <AssemblyVersion>0.5.3.0</AssemblyVersion>
+        <FileVersion>0.5.3.0</FileVersion>
 
         <!-- Package Metadata -->
         <Title>BusyTag Device Management Library</Title>
@@ -43,6 +43,7 @@
 
         <!-- Release Notes -->
         <PackageReleaseNotes>
+            v0.5.3 - Library updates and improvements. Fixed issue for device finding on newest macOS version. Enhanced macOS compatibility and device detection.
             v0.5.2 - Linux support temporarily disabled pending further testing. Improved platform detection and stability for Windows and macOS.
             v0.5.1 - Little fix for SendCommandAsync().
         </PackageReleaseNotes>
