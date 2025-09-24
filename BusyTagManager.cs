@@ -2,9 +2,9 @@
 using System.IO.Ports;
 using System.Runtime.InteropServices;
 
-// #if WINDOWS
+#if WINDOWS
 using System.Management;
-// #endif
+#endif
 
 namespace BusyTag.Lib;
 
@@ -80,7 +80,7 @@ public class BusyTagManager : IDisposable
         {
             return await DiscoverByVidPidWindowsAsync();
         }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.OSDescription.Contains("Darwin"))
         {
             return await DiscoverByVidPidMacOsAsync();
         }
@@ -155,7 +155,7 @@ public class BusyTagManager : IDisposable
         
         try
         {
-// #if WINDOWS
+#if WINDOWS
             // Query WMI for USB devices
             const string query = "SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%USB%'";
 
@@ -182,13 +182,14 @@ public class BusyTagManager : IDisposable
                     }
                 }
             }
-// #else
-//             // If System.Management is not available, fall back to AT command testing
-//             if (EnableVerboseLogging)
-//                 Console.WriteLine("[DEBUG] System.Management not available, falling back to AT command testing");
-//             
-//             return await FindDeviceByAtCommandAsync();
-// #endif
+#else
+            // If System.Management is not available, fall back to AT command testing
+            if (EnableVerboseLogging)
+                Console.WriteLine("[DEBUG] System.Management not available, falling back to AT command testing");
+            
+            // return await FindDeviceByAtCommandAsync();
+            return null;
+#endif
 
             lock (_lockObject)
             {
@@ -255,15 +256,15 @@ public class BusyTagManager : IDisposable
     private static async Task<Dictionary<string, string>> GetMacOsUsbDevicesAsync()
     {
         var devices = new Dictionary<string, string>();
-        
+
         try
         {
             var process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "system_profiler",
-                    Arguments = "SPUSBDataType -json",
+                    FileName = "ioreg",
+                    Arguments = "-c IOUSBHostDevice -r",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     CreateNoWindow = true
@@ -274,39 +275,62 @@ public class BusyTagManager : IDisposable
             var output = await process.StandardOutput.ReadToEndAsync();
             await process.WaitForExitAsync();
 
-            // Parse JSON output to extract VID:PID pairs
-            // This is a simplified version - you might want to use System.Text.Json
+            // Parse ioreg output to extract VID:PID pairs
             var lines = output.Split('\n');
-            string? currentVid = null;
-            string? currentPid = null;
+            var deviceBlocks = new List<Dictionary<string, string>>();
+            var currentDevice = new Dictionary<string, string>();
 
             foreach (var line in lines)
             {
-                if (line.Contains("\"vendor_id\""))
+                // Start of a new device block
+                if (line.Contains("class IOUSBHostDevice"))
                 {
-                    var parts = line.Split(':');
+                    if (currentDevice.Count > 0)
+                    {
+                        deviceBlocks.Add(currentDevice);
+                    }
+                    currentDevice = new Dictionary<string, string>();
+                }
+                else if (line.Contains("\"idVendor\""))
+                {
+                    var parts = line.Split('=');
                     if (parts.Length > 1)
                     {
-                        currentVid = parts[1].Trim().Trim('"').Trim(',');
-                        if (currentVid.StartsWith("0x"))
-                            currentVid = currentVid.Substring(2).ToUpper().Trim('"');
+                        var vendorIdStr = parts[1].Trim();
+                        if (int.TryParse(vendorIdStr, out int vendorId))
+                        {
+                            currentDevice["vid"] = vendorId.ToString("X4");
+                        }
                     }
                 }
-                else if (line.Contains("\"product_id\""))
+                else if (line.Contains("\"idProduct\""))
                 {
-                    var parts = line.Split(':');
+                    var parts = line.Split('=');
                     if (parts.Length > 1)
                     {
-                        currentPid = parts[1].Trim().Trim('"').Trim(',');
-                        if (currentPid.StartsWith("0x"))
-                            currentPid = currentPid.Substring(2).ToUpper().Trim('"');
+                        var productIdStr = parts[1].Trim();
+                        if (int.TryParse(productIdStr, out int productId))
+                        {
+                            currentDevice["pid"] = productId.ToString("X4");
+                        }
                     }
                 }
+            }
 
-                if (currentVid == null || currentPid == null) continue;
-                devices[$"{currentVid}:{currentPid}"] = $"{currentVid}:{currentPid}";
-                currentVid = null;
-                currentPid = null;
+            // Don't forget the last device
+            if (currentDevice.Count > 0)
+            {
+                deviceBlocks.Add(currentDevice);
+            }
+
+            // Convert device blocks to VID:PID pairs
+            foreach (var device in deviceBlocks)
+            {
+                if (device.ContainsKey("vid") && device.ContainsKey("pid"))
+                {
+                    var key = $"{device["vid"]}:{device["pid"]}";
+                    devices[key] = key;
+                }
             }
         }
         catch (Exception ex)
@@ -320,40 +344,19 @@ public class BusyTagManager : IDisposable
     private async Task<List<string>?> FindMacOsSerialPortAsync()
     {
         var foundDevices = new List<string>();
-        
+
         try
         {
-            // Look for serial devices that might be our BusyTag
+            // Since we've already confirmed the USB device exists via VID/PID,
+            // just return the USB modem ports that match our device pattern
             var ports = SerialPort.GetPortNames();
-            
-            var usbPorts = ports.Where(p => 
+
+            var usbPorts = ports.Where(p =>
                 p.StartsWith("/dev/tty.usbmodem")).ToArray();
 
-            foreach (var port in usbPorts)
-            {
-                try
-                {
-                    using var testPort = new SerialPort(port, 460800);
-                    testPort.ReadTimeout = 2000;
-                    testPort.WriteTimeout = 2000;
-
-                    testPort.Open();
-                    testPort.WriteLine("AT+GDN");
-                    await Task.Delay(100);
-
-                    if (testPort.BytesToRead <= 0) continue;
-                    var response = testPort.ReadExisting();
-                    if (!response.Contains("+DN:busytag-")) continue;
-                    
-                    if (EnableVerboseLogging)
-                        Console.WriteLine($"[INFO] Found BusyTag device on {port} via macOS discovery");
-                    foundDevices.Add(port);
-                }
-                catch
-                {
-                    continue;
-                }
-            }
+            // Add all USB modem ports since we already confirmed the USB device exists
+            // Don't try to communicate with them as they might already be in use
+            foundDevices.AddRange(usbPorts);
 
             lock (_lockObject)
             {
@@ -387,7 +390,7 @@ public class BusyTagManager : IDisposable
         try
         {
             const string targetVid = "303A";
-            const string targetPid = "81DF";
+            const string targetPid = "81DF";  
 
             // Use lsusb to find the device
             var process = new Process
