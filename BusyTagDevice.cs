@@ -1049,7 +1049,7 @@ public class BusyTagDevice(string? portName)
             const int chunkSize = 1024 * 8;
             var totalBytesTransferred = 0f;
 
-            var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 150);
+            var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 1000);
             if (!response.Contains(">"))
             {
                 CancelFileUpload(false, UploadErrorType.DeviceError, 
@@ -1331,6 +1331,8 @@ public class BusyTagDevice(string? portName)
             // Continue reading remaining data
             var downloadTimeout = Math.Max(30, fileSize / 1024 + 15);
             var downloadStartTime = DateTime.Now;
+            var zeroSizeResponseCounter = 0;
+            const int maxZeroSizeResponses = 10;
 
             while (totalBytesReceived < fileSize &&
                    (DateTime.Now - downloadStartTime).TotalSeconds < downloadTimeout)
@@ -1345,11 +1347,23 @@ public class BusyTagDevice(string? portName)
                         Trace.WriteLine($"Progress for {fileName}: {(int)(totalBytesReceived * 100 / fileSize)}%");
                         // progress?.Report((int)(totalBytesReceived * 100 / fileSize));
 
+                        // Reset counter on successful read
+                        zeroSizeResponseCounter = 0;
+
                         if (totalBytesReceived >= fileSize)
                             break;
                     }
                     else
                     {
+                        zeroSizeResponseCounter++;
+                        Trace.WriteLine($"Zero-size response count: {zeroSizeResponseCounter}/{maxZeroSizeResponses}");
+
+                        if (zeroSizeResponseCounter >= maxZeroSizeResponses)
+                        {
+                            Trace.WriteLine($"Download failed: Received {maxZeroSizeResponses} consecutive zero-size responses");
+                            break;
+                        }
+
                         await Task.Delay(1);
                     }
                 }
