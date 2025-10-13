@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO.Ports;
 using System.Text;
@@ -31,6 +32,10 @@ public class BusyTagDevice(string? portName)
     private readonly object _lockObject = new object();
     private DeviceConfig _deviceConfig = new();
     public string? PortName { get; } = portName;
+
+    // Centralized data buffer - all serial data flows through sp_DataReceived
+    private readonly ConcurrentQueue<byte> _dataBuffer = new();
+    private readonly SemaphoreSlim _dataAvailableSemaphore = new(0);
 
     public bool IsConnected => _serialPort is { IsOpen: true };
 
@@ -164,6 +169,7 @@ public class BusyTagDevice(string? portName)
         {
             _serialPort?.Close();
             _serialPort?.Dispose();
+            ClearBuffer(); // Clean up the centralized buffer
         }
         finally
         {
@@ -193,59 +199,33 @@ public class BusyTagDevice(string? portName)
         }
     }
 
-    private Task<string> SendCommandAsync(string command, int timeoutMs = 150, bool waitForFirstResponse = true,
+    private async Task<string> SendCommandAsync(string command, int timeoutMs = 150, bool waitForFirstResponse = true,
         bool discardInBuffer = true)
     {
-        if(_asyncCommandActive || _writeRawData) return Task.FromResult(string.Empty);
+        if(_asyncCommandActive || _writeRawData) return string.Empty;
         if (!IsConnected)
         {
             Disconnect();
-            return Task.FromResult(string.Empty);
+            return string.Empty;
         }
 
         try
         {
             string result;
             long timestamp;
+
+            _asyncCommandActive = true;
+
             lock (_lockObject)
             {
                 try
                 {
-                    _asyncCommandActive = true;
-                    if (discardInBuffer) _serialPort?.DiscardInBuffer();
+                    // Clear buffer instead of discarding serial port buffer
+                    if (discardInBuffer) ClearBuffer();
                     if (!string.IsNullOrEmpty(command)) _serialPort?.WriteLine(command);
-                    
+
                     timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                     Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{command}");
-
-                    var response = new StringBuilder();
-                    var startTime = DateTime.Now;
-
-                    while ((DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
-                    {
-                        if (_serialPort?.BytesToRead > 0)
-                        {
-                            Trace.WriteLine($"_serialPort?.BytesToRead: {_serialPort.BytesToRead}");
-                            var data = _serialPort.ReadExisting();
-                            response.Append(data);
-
-                            var responseStr = response.ToString();
-                            if (responseStr.Contains("OK\r\n") || responseStr.Contains("ERROR:") ||
-                                responseStr.Contains(">"))
-                            {
-                                timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                                Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{responseStr.Trim()}");
-                                _asyncCommandActive = false;
-                                return Task.FromResult(responseStr.Trim());
-                            }
-
-                            if (waitForFirstResponse) break;
-                        }
-
-                        Thread.Sleep(1);
-                    }
-
-                    result = response.ToString().Trim();
                 }
                 catch (Exception ex)
                 {
@@ -255,10 +235,39 @@ public class BusyTagDevice(string? portName)
                 }
             }
 
+            // Read response from buffer (outside lock to allow sp_DataReceived to run)
+            var response = new StringBuilder();
+            var startTime = DateTime.Now;
+
+            while ((DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
+            {
+                if (GetBufferCount() > 0)
+                {
+                    Trace.WriteLine($"Buffer has {GetBufferCount()} bytes");
+                    var data = await ReadStringFromBufferAsync(50);
+                    response.Append(data);
+
+                    var responseStr = response.ToString();
+                    if (responseStr.Contains("OK\r\n") || responseStr.Contains("ERROR:") ||
+                        responseStr.Contains(">"))
+                    {
+                        timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+                        Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{responseStr.Trim()}");
+                        _asyncCommandActive = false;
+                        return responseStr.Trim();
+                    }
+
+                    if (waitForFirstResponse) break;
+                }
+
+                await Task.Delay(1);
+            }
+
+            result = response.ToString().Trim();
             timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{result.Trim()}");
+            Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{result}");
             _asyncCommandActive = false;
-            return Task.FromResult(result);
+            return result;
         }
         finally
         {
@@ -274,66 +283,64 @@ public class BusyTagDevice(string? portName)
 
         try
         {
-            byte[] result;
+            _asyncCommandActive = true;
+
             lock (_lockObject)
             {
                 try
                 {
-                    _asyncCommandActive = true;
                     var isReadOnlyOperation = data == null || data.Length == 0;
 
                     if (!isReadOnlyOperation)
                     {
-                        var preExistingBytes = _serialPort?.BytesToRead ?? 0;
-                        Trace.WriteLine($"preExistingBytes: {preExistingBytes}");
+                        var preExistingBytes = GetBufferCount();
+                        Trace.WriteLine($"preExistingBytes in buffer: {preExistingBytes}");
                         if (preExistingBytes > 0)
                         {
-                            if (discardInBuffer) _serialPort?.DiscardInBuffer();
+                            if (discardInBuffer) ClearBuffer();
                         }
 
                         if (data != null) _serialPort?.Write(data, 0, data.Length);
                     }
-
-                    var responseBuffer = new List<byte>();
-                    var startTime = DateTime.Now;
-
-                    while ((DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
-                    {
-                        var currentBytesToRead = _serialPort?.BytesToRead ?? 0;
-
-                        if (currentBytesToRead > 0)
-                        {
-                            Trace.WriteLine($"currentBytesToRead: {currentBytesToRead}");
-                            var buffer = new byte[currentBytesToRead];
-                            var bytesRead = _serialPort?.Read(buffer, 0, buffer.Length) ?? 0;
-
-                            if (bytesRead > 0)
-                            {
-                                responseBuffer.AddRange(buffer.Take(bytesRead));
-                            }
-                        }
-                        else
-                        {
-                            Thread.Sleep(1);
-                        }
-                    }
-
-                    result = responseBuffer.ToArray();
                 }
                 catch (Exception ex)
                 {
+                    _asyncCommandActive = false;
                     Trace.WriteLine($"[SEND BYTES] Exception: {ex.Message}");
                     throw new InvalidOperationException($"Binary operation failed: {ex.Message}", ex);
-                    // result = [];
+                }
+            }
+
+            // Read response from buffer (outside lock to allow sp_DataReceived to run)
+            var responseBuffer = new List<byte>();
+            var startTime = DateTime.Now;
+
+            while ((DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
+            {
+                var currentBytesToRead = GetBufferCount();
+
+                if (currentBytesToRead > 0)
+                {
+                    Trace.WriteLine($"currentBytesToRead from buffer: {currentBytesToRead}");
+                    var buffer = await ReadFromBufferAsync(currentBytesToRead, 100);
+
+                    if (buffer.Length > 0)
+                    {
+                        responseBuffer.AddRange(buffer);
+                    }
+                }
+                else
+                {
+                    await Task.Delay(1);
                 }
             }
 
             _asyncCommandActive = false;
-            return result;
+            return responseBuffer.ToArray();
         }
         finally
         {
-            // Always ensure this is reset
+            _asyncCommandActive = false;
         }
     }
 
@@ -344,60 +351,107 @@ public class BusyTagDevice(string? portName)
         const int bufSize = 1024 * 8;
         var buf = new byte[bufSize];
         long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-        Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]sp_DataReceived {_serialPort.BytesToRead} bytes");
-        if (_asyncCommandActive)
-        {
-            return;
-        }
 
-        // string data = _serialPort.ReadLine();
         try
         {
-            var len = _serialPort?.Read(buf, 0, bufSize);
-            // long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            // Trace.WriteLine($"timestamp: {timestamp}, len:{len}");
-            var data = System.Text.Encoding.UTF8.GetString(buf, 0, buf.Length);
+            // CENTRALIZED READ: This is the ONLY place where we read from the serial port
+            var bytesAvailable = _serialPort.BytesToRead;
+            if (bytesAvailable <= 0) return;
 
-            // if (_receivingFile)
-            // {
-            //     if (len != null)
-            //     {
-            //         if (data.Contains("ERROR"))
-            //         {
-            //             _memoryStream.Dispose();
-            //             _receivingFile = false;
-            //             return;
-            //         }
-            //
-            //         _currentlyReceivingFileSize += (int)len;
-            //         _memoryStream.Write(buf, 0, (int)len);
-            //     }
-            //
-            //     if (_currentlyReceivingFile != null &&
-            //         _currentlyReceivingFileSize >= _currentlyReceivingFile.Value.Size)
-            //     {
-            //         string outputFilePath = Path.Combine(CachedFileDirPath, _currentlyReceivingFile.Value.Name);
-            //         CurrentImagePath = outputFilePath;
-            //         Trace.WriteLine($"Saving {_currentlyReceivingFile.Value.Name} to {CurrentImagePath}");
-            //         File.WriteAllBytes(outputFilePath, _memoryStream.ToArray());
-            //         ReceivedShowingPicture?.Invoke(this, CurrentImageName);
-            //         _receivingFile = false;
-            //     }
-            //
-            //     return;
-            // }
+            Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]sp_DataReceived {bytesAvailable} bytes");
 
-            FilterResponse(data);
+            var len = _serialPort.Read(buf, 0, Math.Min(bufSize, bytesAvailable));
+
+            if (len > 0)
+            {
+                // Add all received bytes to the centralized buffer
+                for (int i = 0; i < len; i++)
+                {
+                    _dataBuffer.Enqueue(buf[i]);
+                }
+
+                // Signal that data is available
+                _dataAvailableSemaphore.Release(len);
+
+                // If not in command mode, filter and process async events
+                if (!_asyncCommandActive)
+                {
+                    var data = Encoding.UTF8.GetString(buf, 0, len);
+                    FilterResponse(data);
+                }
+            }
         }
         catch (Exception exception)
         {
-            Console.WriteLine(exception);
+            Trace.WriteLine($"[ERROR] sp_DataReceived: {exception.Message}");
         }
     }
 
     private static void sp_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
     {
         Trace.WriteLine(e.ToString());
+    }
+
+    /// <summary>
+    /// Read data from the centralized buffer (populated by sp_DataReceived).
+    /// This is the only proper way to read serial data - never read directly from _serialPort.
+    /// </summary>
+    private async Task<byte[]> ReadFromBufferAsync(int maxBytes, int timeoutMs)
+    {
+        var result = new List<byte>();
+        var startTime = DateTime.Now;
+
+        while (result.Count < maxBytes && (DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
+        {
+            // Wait for data to be available (with timeout)
+            var remainingTimeout = timeoutMs - (int)(DateTime.Now - startTime).TotalMilliseconds;
+            if (remainingTimeout <= 0) break;
+
+            var dataAvailable = await _dataAvailableSemaphore.WaitAsync(Math.Min(remainingTimeout, 10));
+
+            if (dataAvailable && _dataBuffer.TryDequeue(out byte b))
+            {
+                result.Add(b);
+            }
+            else if (!dataAvailable)
+            {
+                // Small delay if no data available yet
+                await Task.Delay(1);
+            }
+        }
+
+        return result.ToArray();
+    }
+
+    /// <summary>
+    /// Read string data from the centralized buffer.
+    /// </summary>
+    private async Task<string> ReadStringFromBufferAsync(int timeoutMs)
+    {
+        var bytes = await ReadFromBufferAsync(1024 * 8, timeoutMs);
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    /// <summary>
+    /// Clear the centralized buffer. Use this instead of _serialPort.DiscardInBuffer().
+    /// </summary>
+    private void ClearBuffer()
+    {
+        while (_dataBuffer.TryDequeue(out _)) { }
+
+        // Drain the semaphore
+        while (_dataAvailableSemaphore.CurrentCount > 0)
+        {
+            _dataAvailableSemaphore.Wait(0);
+        }
+    }
+
+    /// <summary>
+    /// Get the number of bytes available in the buffer.
+    /// </summary>
+    private int GetBufferCount()
+    {
+        return _dataBuffer.Count;
     }
 
     private void FilterResponse(string data)
@@ -1265,11 +1319,12 @@ public class BusyTagDevice(string? portName)
         var destFilePath = Path.Combine(CachedFileDirPath, fileName);
         if (FirmwareVersionFloat >= 2.0)
         {
-            // Clear any pending data
-            if (_serialPort?.BytesToRead > 0)
+            // Clear any pending data from the buffer
+            var pendingBytes = GetBufferCount();
+            if (pendingBytes > 0)
             {
-                var pendingData = _serialPort.ReadExisting();
-                Trace.WriteLine($"Cleared {pendingData.Length} chars of pending data");
+                ClearBuffer();
+                Trace.WriteLine($"Cleared {pendingBytes} bytes of pending data from buffer");
             }
 
             // Send download command
@@ -1302,7 +1357,7 @@ public class BusyTagDevice(string? portName)
 
             Trace.WriteLine($"File size: {fileSize:N0} bytes");
 
-            // Find data start position
+            // Find the data start position
             var headerPatterns = new[] { "\r\n\r\n", "\n\n" };
             int dataStart = -1;
             foreach (var pattern in headerPatterns)
