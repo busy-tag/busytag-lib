@@ -1049,7 +1049,7 @@ public class BusyTagDevice(string? portName)
             const int chunkSize = 1024 * 8;
             var totalBytesTransferred = 0f;
 
-            var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 150);
+            var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 1000);
             if (!response.Contains(">"))
             {
                 CancelFileUpload(false, UploadErrorType.DeviceError, 
