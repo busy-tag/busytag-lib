@@ -194,7 +194,7 @@ public class BusyTagDevice(string? portName)
 
         lock (_lockObject)
         {
-            Trace.WriteLine($"Sending raw data count: {count}");
+            Debug.WriteLine($"Sending raw data count: {count}");
             _serialPort?.Write(data, offset, count);
         }
     }
@@ -225,7 +225,7 @@ public class BusyTagDevice(string? portName)
                     if (!string.IsNullOrEmpty(command)) _serialPort?.WriteLine(command);
 
                     timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                    Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{command}");
+                    Debug.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{command}");
                 }
                 catch (Exception ex)
                 {
@@ -243,7 +243,7 @@ public class BusyTagDevice(string? portName)
             {
                 if (GetBufferCount() > 0)
                 {
-                    Trace.WriteLine($"Buffer has {GetBufferCount()} bytes");
+                    Debug.WriteLine($"Buffer has {GetBufferCount()} bytes");
                     var data = await ReadStringFromBufferAsync(50);
                     response.Append(data);
 
@@ -252,7 +252,7 @@ public class BusyTagDevice(string? portName)
                         responseStr.Contains(">"))
                     {
                         timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                        Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{responseStr.Trim()}");
+                        Debug.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{responseStr.Trim()}");
                         _asyncCommandActive = false;
                         return responseStr.Trim();
                     }
@@ -265,7 +265,7 @@ public class BusyTagDevice(string? portName)
 
             result = response.ToString().Trim();
             timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{result}");
+            Debug.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{result}");
             _asyncCommandActive = false;
             return result;
         }
@@ -294,7 +294,7 @@ public class BusyTagDevice(string? portName)
                     if (!isReadOnlyOperation)
                     {
                         var preExistingBytes = GetBufferCount();
-                        Trace.WriteLine($"preExistingBytes in buffer: {preExistingBytes}");
+                        Debug.WriteLine($"preExistingBytes in buffer: {preExistingBytes}");
                         if (preExistingBytes > 0)
                         {
                             if (discardInBuffer) ClearBuffer();
@@ -321,7 +321,7 @@ public class BusyTagDevice(string? portName)
 
                 if (currentBytesToRead > 0)
                 {
-                    Trace.WriteLine($"currentBytesToRead from buffer: {currentBytesToRead}");
+                    Debug.WriteLine($"currentBytesToRead from buffer: {currentBytesToRead}");
                     var buffer = await ReadFromBufferAsync(currentBytesToRead, 100);
 
                     if (buffer.Length > 0)
@@ -358,7 +358,7 @@ public class BusyTagDevice(string? portName)
             var bytesAvailable = _serialPort.BytesToRead;
             if (bytesAvailable <= 0) return;
 
-            Trace.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]sp_DataReceived {bytesAvailable} bytes");
+            Debug.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]sp_DataReceived {bytesAvailable} bytes");
 
             var len = _serialPort.Read(buf, 0, Math.Min(bufSize, bytesAvailable));
 
@@ -457,16 +457,16 @@ public class BusyTagDevice(string? portName)
     private void FilterResponse(string data)
     {
         long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-        Trace.WriteLine($"FilterResponse [{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{data}");
+        Debug.WriteLine($"FilterResponse [{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{data}");
         var lines = data.Split(['\r', '\n']);
-        // Trace.WriteLine($"lines.Length: {lines.Length}");
+        // Debug.WriteLine($"lines.Length: {lines.Length}");
         foreach (string line in lines)
         {
-            // Trace.WriteLine($"line: {line.Trim()}");
+            // Debug.WriteLine($"line: {line.Trim()}");
             if (line.Length > 1 && line[0] == '+')
             {
                 string[] parts = line.Split(':');
-                // Trace.WriteLine($"parts[0]: {parts[0]}, parts[1]: {parts[1]}\r\n");
+                // Debug.WriteLine($"parts[0]: {parts[0]}, parts[1]: {parts[1]}\r\n");
                 if (parts.Length > 1)
                 {
                     // if (parts[0].Equals("+DN"))
@@ -735,7 +735,7 @@ public class BusyTagDevice(string? portName)
                 }
                 catch (Exception e)
                 {
-                    Trace.WriteLine(e.Message);
+                    Debug.WriteLine(e.Message);
                 }
             }
         }
@@ -872,6 +872,20 @@ public class BusyTagDevice(string? portName)
         return false;
     }
 
+    /// <summary>
+    /// Sends a custom AT command to the device and returns the response.
+    /// </summary>
+    /// <param name="command">The AT command to send (without \r\n)</param>
+    /// <param name="timeoutMs">Response timeout in milliseconds (default: 150ms)</param>
+    /// <param name="waitForFirstResponse">Whether to wait only for the first response (default: true)</param>
+    /// <param name="discardInBuffer">Whether to discard the input buffer before sending (default: true)</param>
+    /// <returns>The device response as a string</returns>
+    public async Task<string> SendCustomCommandAsync(string command, int timeoutMs = 150,
+        bool waitForFirstResponse = true, bool discardInBuffer = true)
+    {
+        return await SendCommandAsync(command, timeoutMs, waitForFirstResponse, discardInBuffer);
+    }
+
     public async Task<bool> SetNewCustomPattern(List<PatternLine> list, bool playAfterSending, bool playPatternNonStop)
     {
         if (_isPlayingPattern)
@@ -937,7 +951,7 @@ public class BusyTagDevice(string? portName)
         var allDrives = DriveInfo.GetDrives();
         foreach (var d in allDrives)
         {
-            // Trace.WriteLine($"drive:{d.Name}");
+            // Debug.WriteLine($"drive:{d.Name}");
             if (d == null) continue;
             if (!d.IsReady) continue;
             var path = Path.Combine(d.Name, "readme.txt");
@@ -1147,8 +1161,8 @@ public class BusyTagDevice(string? portName)
                 }
                 catch (Exception ex)
                 {
-                    Trace.WriteLine($"Error sending chunk: {ex.Message}");
-                    CancelFileUpload(false, UploadErrorType.TransferInterrupted, 
+                    Debug.WriteLine($"Error sending chunk: {ex.Message}");
+                    CancelFileUpload(false, UploadErrorType.TransferInterrupted,
                         $"Data transfer failed: {ex.Message}");
                     return false;
                 }
@@ -1214,7 +1228,7 @@ public class BusyTagDevice(string? portName)
         // Delete the oldest file
         var oldestFile = files.First();
         oldestFile.Delete();
-        Trace.WriteLine($"Deleted oldest file: {oldestFile.Name}");
+        Debug.WriteLine($"Deleted oldest file: {oldestFile.Name}");
     }
 
     private async Task<bool> AutoDeleteFile()
@@ -1324,7 +1338,7 @@ public class BusyTagDevice(string? portName)
             if (pendingBytes > 0)
             {
                 ClearBuffer();
-                Trace.WriteLine($"Cleared {pendingBytes} bytes of pending data from buffer");
+                Debug.WriteLine($"Cleared {pendingBytes} bytes of pending data from buffer");
             }
 
             // Send download command
@@ -1333,7 +1347,7 @@ public class BusyTagDevice(string? portName)
 
             if (responseBytes.Length == 0)
             {
-                Trace.WriteLine("No response received for download command");
+                Debug.WriteLine("No response received for download command");
                 return "";
             }
 
@@ -1344,18 +1358,18 @@ public class BusyTagDevice(string? portName)
             var sizeLine = lines.FirstOrDefault(l => l.StartsWith("+GF:"));
             if (sizeLine == null)
             {
-                Trace.WriteLine("Invalid download response - no file info found");
+                Debug.WriteLine("Invalid download response - no file info found");
                 return "";
             }
 
             var sizeParts = sizeLine.Split(',');
             if (sizeParts.Length < 2 || !long.TryParse(sizeParts[1].Trim(), out var fileSize) || fileSize <= 0)
             {
-                Trace.WriteLine($"Invalid file size in response: {sizeLine}");
+                Debug.WriteLine($"Invalid file size in response: {sizeLine}");
                 return "";
             }
 
-            Trace.WriteLine($"File size: {fileSize:N0} bytes");
+            Debug.WriteLine($"File size: {fileSize:N0} bytes");
 
             // Find the data start position
             var headerPatterns = new[] { "\r\n\r\n", "\n\n" };
@@ -1379,7 +1393,7 @@ public class BusyTagDevice(string? portName)
                 var initialDataBytes = responseBytes.Skip(dataStart).ToArray();
                 fileData.AddRange(initialDataBytes);
                 totalBytesReceived = initialDataBytes.Length;
-                Trace.WriteLine($"Progress for {fileName}: {(int)(totalBytesReceived * 100 / fileSize)}%");
+                Debug.WriteLine($"Progress for {fileName}: {(int)(totalBytesReceived * 100 / fileSize)}%");
                 // progress?.Report((int)(totalBytesReceived * 100 / fileSize));
             }
 
@@ -1399,7 +1413,7 @@ public class BusyTagDevice(string? portName)
                     {
                         fileData.AddRange(chunk);
                         totalBytesReceived += chunk.Length;
-                        Trace.WriteLine($"Progress for {fileName}: {(int)(totalBytesReceived * 100 / fileSize)}%");
+                        Debug.WriteLine($"Progress for {fileName}: {(int)(totalBytesReceived * 100 / fileSize)}%");
                         // progress?.Report((int)(totalBytesReceived * 100 / fileSize));
 
                         // Reset counter on successful read
@@ -1411,11 +1425,11 @@ public class BusyTagDevice(string? portName)
                     else
                     {
                         zeroSizeResponseCounter++;
-                        Trace.WriteLine($"Zero-size response count: {zeroSizeResponseCounter}/{maxZeroSizeResponses}");
+                        Debug.WriteLine($"Zero-size response count: {zeroSizeResponseCounter}/{maxZeroSizeResponses}");
 
                         if (zeroSizeResponseCounter >= maxZeroSizeResponses)
                         {
-                            Trace.WriteLine($"Download failed: Received {maxZeroSizeResponses} consecutive zero-size responses");
+                            Debug.WriteLine($"Download failed: Received {maxZeroSizeResponses} consecutive zero-size responses");
                             break;
                         }
 
@@ -1424,19 +1438,19 @@ public class BusyTagDevice(string? portName)
                 }
                 catch (Exception ex)
                 {
-                    Trace.WriteLine($"Download chunk failed: {ex.Message}");
+                    Debug.WriteLine($"Download chunk failed: {ex.Message}");
                     break;
                 }
             }
 
             if (totalBytesReceived >= fileSize)
             {
-                Trace.WriteLine($"Serial download completed: {fileName}");
+                Debug.WriteLine($"Serial download completed: {fileName}");
                 await File.WriteAllBytesAsync(destFilePath, fileData.Take((int)fileSize).ToArray());
                 return destFilePath;
             }
 
-            Trace.WriteLine($"Download incomplete: {totalBytesReceived}/{fileSize} bytes");
+            Debug.WriteLine($"Download incomplete: {totalBytesReceived}/{fileSize} bytes");
             return "";
         }
 

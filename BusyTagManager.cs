@@ -66,7 +66,7 @@ public class BusyTagManager : IDisposable
         }
         catch (Exception e)
         {
-            Trace.WriteLine(e.Message);
+            Debug.WriteLine(e.Message);
         }
     }
 
@@ -87,13 +87,13 @@ public class BusyTagManager : IDisposable
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && EnableExperimentalLinuxSupport)
         {
             if (EnableVerboseLogging)
-                Console.WriteLine("[WARNING] Linux support is experimental and not fully tested");
+                Debug.WriteLine("[WARNING] Linux support is experimental and not fully tested");
             return await DiscoverByVidPidLinuxAsync();
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
             if (EnableVerboseLogging)
-                Console.WriteLine("[INFO] Linux platform detected but support is disabled. Set EnableExperimentalLinuxSupport = true to enable experimental support.");
+                Debug.WriteLine("[INFO] Linux platform detected but support is disabled. Set EnableExperimentalLinuxSupport = true to enable experimental support.");
         }
         
         _isScanningForDevices = false;
@@ -142,7 +142,7 @@ public class BusyTagManager : IDisposable
         catch (Exception ex)
         {
             if (EnableVerboseLogging)
-                Console.WriteLine($"[DEBUG] Windows VID/PID discovery failed: {ex.Message}");
+                Debug.WriteLine($"[DEBUG] Windows VID/PID discovery failed: {ex.Message}");
             _isScanningForDevices = false;
             return null;
         }
@@ -185,7 +185,7 @@ public class BusyTagManager : IDisposable
 #else
             // If System.Management is not available, fall back to AT command testing
             if (EnableVerboseLogging)
-                Console.WriteLine("[DEBUG] System.Management not available, falling back to AT command testing");
+                Debug.WriteLine("[DEBUG] System.Management not available, falling back to AT command testing");
 
             // For non-Windows platforms, return empty list as this functionality is not supported
             return foundDevices;
@@ -204,7 +204,7 @@ public class BusyTagManager : IDisposable
         catch (Exception ex)
         {
             if (EnableVerboseLogging)
-                Console.WriteLine($"[DEBUG] Windows WMI query failed: {ex.Message}");
+                Debug.WriteLine($"[DEBUG] Windows WMI query failed: {ex.Message}");
             _isScanningForDevices = false;
         }
         
@@ -246,7 +246,7 @@ public class BusyTagManager : IDisposable
         catch (Exception ex)
         {
             if (EnableVerboseLogging)
-                Console.WriteLine($"[DEBUG] macOS VID/PID discovery failed: {ex.Message}");
+                Debug.WriteLine($"[DEBUG] macOS VID/PID discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
@@ -335,7 +335,7 @@ public class BusyTagManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DEBUG] Failed to get macOS USB devices: {ex.Message}");
+            Debug.WriteLine($"[DEBUG] Failed to get macOS USB devices: {ex.Message}");
         }
 
         return devices;
@@ -371,7 +371,7 @@ public class BusyTagManager : IDisposable
         catch (Exception ex)
         {
             if (EnableVerboseLogging)
-                Console.WriteLine($"[DEBUG] macOS serial port discovery failed: {ex.Message}");
+                Debug.WriteLine($"[DEBUG] macOS serial port discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
@@ -429,7 +429,7 @@ public class BusyTagManager : IDisposable
         catch (Exception ex)
         {
             if (EnableVerboseLogging)
-                Console.WriteLine($"[DEBUG] Linux VID/PID discovery failed: {ex.Message}");
+                Debug.WriteLine($"[DEBUG] Linux VID/PID discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
@@ -464,9 +464,9 @@ public class BusyTagManager : IDisposable
                     if (testPort.BytesToRead <= 0) continue;
                     var response = testPort.ReadExisting();
                     if (!response.Contains("+DN:busytag-")) continue;
-                    
+
                     if (EnableVerboseLogging)
-                        Console.WriteLine($"[INFO] Found BusyTag device on {port} via Linux discovery");
+                        Debug.WriteLine($"[INFO] Found BusyTag device on {port} via Linux discovery");
                     foundDevices.Add(port);
                 }
                 catch
@@ -488,7 +488,7 @@ public class BusyTagManager : IDisposable
         catch (Exception ex)
         {
             if (EnableVerboseLogging)
-                Console.WriteLine($"[DEBUG] Linux serial port discovery failed: {ex.Message}");
+                Debug.WriteLine($"[DEBUG] Linux serial port discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
@@ -522,9 +522,9 @@ public class BusyTagManager : IDisposable
                     if (testPort.BytesToRead <= 0) continue;
                     var response = testPort.ReadExisting();
                     if (!response.Contains("+DN:busytag-")) continue;
-                    
+
                     if (EnableVerboseLogging)
-                        Console.WriteLine($"[INFO] Found BusyTag device on {port} via AT command");
+                        Debug.WriteLine($"[INFO] Found BusyTag device on {port} via AT command");
                     foundDevices.Add(port);
                 }
                 catch
@@ -546,7 +546,7 @@ public class BusyTagManager : IDisposable
         catch (Exception ex)
         {
             if (EnableVerboseLogging)
-                Console.WriteLine($"[DEBUG] AT command discovery failed: {ex.Message}");
+                Debug.WriteLine($"[DEBUG] AT command discovery failed: {ex.Message}");
             _isScanningForDevices = false;
         }
 
