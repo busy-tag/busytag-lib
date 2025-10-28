@@ -833,6 +833,22 @@ public class BusyTagDevice(string? portName)
         return response.Contains("OK");
     }
 
+    public async Task<bool> SetWifiStationCredentialsAsync(string ssid, string password)
+    {
+        var response = await SendCommandAsync($"AT+STA={ssid},{password}", 1000);
+        return response.Contains("OK");
+    }
+
+    public async Task<bool> SetWifiModeAsync(int mode)
+    {
+        // Mode: 0=OFF, 1=STA, 2=AP, 3=STA+AP
+        if (mode is < 0 or > 3)
+            throw new ArgumentOutOfRangeException(nameof(mode), "WiFi mode must be between 0 and 3");
+
+        var response = await SendCommandAsync($"AT+WM={mode}", 2000);
+        return response.Contains("OK");
+    }
+
     public async Task<bool> SetSolidColorAsync(string color, int brightness = 100, int ledBits = 127)
     {
         var bright = (int)(brightness * 2.55);
