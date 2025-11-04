@@ -373,10 +373,11 @@ public class BusyTagDevice(string? portName)
                 // Signal that data is available
                 _dataAvailableSemaphore.Release(len);
 
+                var data = Encoding.UTF8.GetString(buf, 0, len);
+                // Debug.WriteLine($"[RX {_asyncCommandActive}] {data}");
                 // If not in command mode, filter and process async events
-                if (!_asyncCommandActive)
+                if (!_asyncCommandActive|| data.StartsWith("+evn:"))
                 {
-                    var data = Encoding.UTF8.GetString(buf, 0, len);
                     FilterResponse(data);
                 }
             }
