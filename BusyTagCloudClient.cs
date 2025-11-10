@@ -61,6 +61,9 @@ public class BusyTagCloudClient : IDisposable
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Queuing command: {command} (priority: {priority})");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] URL: {_baseUrl}/device/{_deviceId}/commands");
+
             var requestBody = new
             {
                 command = command,
@@ -72,16 +75,22 @@ public class BusyTagCloudClient : IDisposable
                 requestBody
             );
 
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Queue command response: {response.StatusCode}");
+
             if (!response.IsSuccessStatusCode)
             {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[Cloud] Queue command failed: {errorContent}");
+
                 return new CloudCommandResponse
                 {
                     Success = false,
-                    ErrorMessage = $"HTTP {response.StatusCode}: {await response.Content.ReadAsStringAsync()}"
+                    ErrorMessage = $"HTTP {response.StatusCode}: {errorContent}"
                 };
             }
 
             var result = await response.Content.ReadFromJsonAsync<CloudCommandQueueResult>();
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Command queued successfully: {result?.CommandId}");
 
             return new CloudCommandResponse
             {
@@ -92,6 +101,9 @@ public class BusyTagCloudClient : IDisposable
         }
         catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Queue command exception: {ex.GetType().Name}: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Inner exception: {ex.InnerException?.Message}");
+
             return new CloudCommandResponse
             {
                 Success = false,
@@ -107,17 +119,41 @@ public class BusyTagCloudClient : IDisposable
     {
         try
         {
-            var response = await _httpClient.GetAsync($"{_baseUrl}/commands/{commandId}");
+            var url = $"{_baseUrl}/commands/{commandId}";
+            System.Diagnostics.Debug.WriteLine($"[Cloud] GET {url}");
+
+            var response = await _httpClient.GetAsync(url);
+
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Response: {response.StatusCode}");
 
             if (!response.IsSuccessStatusCode)
             {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[Cloud] Error: {errorContent}");
                 return null;
             }
 
-            return await response.Content.ReadFromJsonAsync<CloudCommandStatus>();
+            var content = await response.Content.ReadAsStringAsync();
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Response body: {content}");
+
+            var options = new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+            options.Converters.Add(new IntToBoolConverter());
+
+            var status = System.Text.Json.JsonSerializer.Deserialize<CloudCommandStatus>(content, options);
+
+            if (status != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Cloud] Parsed: Status={status.Status}, Success={status.Success}, Response={status.Response?.Substring(0, Math.Min(50, status.Response?.Length ?? 0))}...");
+            }
+
+            return status;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] GetCommandStatus exception: {ex.Message}");
             return null;
         }
     }
@@ -132,19 +168,35 @@ public class BusyTagCloudClient : IDisposable
     {
         var interval = pollInterval ?? TimeSpan.FromSeconds(2);
         var endTime = DateTime.UtcNow.Add(timeout);
+        int checkCount = 0;
+
+        System.Diagnostics.Debug.WriteLine($"[Cloud] Waiting for command completion: {commandId}");
+        System.Diagnostics.Debug.WriteLine($"[Cloud] Timeout: {timeout.TotalSeconds}s, Poll interval: {interval.TotalSeconds}s");
 
         while (DateTime.UtcNow < endTime)
         {
+            checkCount++;
             var status = await GetCommandStatusAsync(commandId);
 
-            if (status != null && (status.Status == "completed" || status.Status == "failed"))
+            if (status != null)
             {
-                return status;
+                System.Diagnostics.Debug.WriteLine($"[Cloud] Check #{checkCount}: Status={status.Status}, Success={status.Success}");
+
+                if (status.Status == "completed" || status.Status == "failed")
+                {
+                    System.Diagnostics.Debug.WriteLine($"[Cloud] Command finished: {status.Status}");
+                    return status;
+                }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"[Cloud] Check #{checkCount}: No status returned");
             }
 
             await Task.Delay(interval);
         }
 
+        System.Diagnostics.Debug.WriteLine($"[Cloud] Command timed out after {checkCount} checks");
         return null; // Timeout
     }
 
@@ -218,15 +270,17 @@ public class BusyTagCloudClient : IDisposable
             }
 
             // Wait for the device to pick up and execute the command
-            // Use remaining time or at least 15 seconds
+            // Use remaining time or at least 30 seconds (device needs time to poll cloud)
             var remainingTimeout = testTimeout - TimeSpan.FromSeconds(waitForOnline ? 30 : 0);
-            if (remainingTimeout.TotalSeconds < 15)
-                remainingTimeout = TimeSpan.FromSeconds(15);
+            if (remainingTimeout.TotalSeconds < 30)
+                remainingTimeout = TimeSpan.FromSeconds(30);
+
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Waiting up to {remainingTimeout.TotalSeconds}s for device to execute command");
 
             var commandStatus = await WaitForCommandCompletionAsync(
                 queueResult.CommandId,
                 remainingTimeout,
-                TimeSpan.FromSeconds(2)
+                TimeSpan.FromSeconds(3) // Poll every 3 seconds like dashboard (5s) but slightly faster
             );
 
             if (commandStatus == null)
@@ -280,6 +334,10 @@ public class BusyTagCloudClient : IDisposable
     {
         try
         {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Registering device: {_deviceId}");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] URL: {_baseUrl}/device/{_deviceId}/register");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Device Name: {deviceName}, Firmware: {firmwareVersion}");
+
             var requestBody = new
             {
                 device_name = deviceName,
@@ -291,10 +349,25 @@ public class BusyTagCloudClient : IDisposable
                 requestBody
             );
 
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Registration response: {response.StatusCode}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[Cloud] Registration success: {responseContent}");
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[Cloud] Registration failed: {errorContent}");
+            }
+
             return response.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Registration exception: {ex.GetType().Name}: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Stack trace: {ex.StackTrace}");
             return false;
         }
     }
@@ -684,6 +757,7 @@ public class CloudCommandStatus
     public string? Response { get; set; }
 
     [JsonPropertyName("success")]
+    [JsonConverter(typeof(IntToBoolConverter))]
     public bool? Success { get; set; }
 
     [JsonPropertyName("created_at")]

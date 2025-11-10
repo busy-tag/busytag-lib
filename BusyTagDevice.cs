@@ -43,6 +43,7 @@ public class BusyTagDevice(string? portName)
     public string ManufactureName { get; private set; } = string.Empty;
     public string Id { get; private set; } = string.Empty;
     public string FirmwareVersion { get; private set; } = string.Empty;
+    public string HardwareVersion { get; private set; } = string.Empty;
     public float FirmwareVersionFloat { get; private set; }
 
     public string CurrentImageName { get; private set; } = string.Empty;
@@ -131,6 +132,7 @@ public class BusyTagDevice(string? portName)
             await GetManufactureNameAsync();
             await GetDeviceIdAsync();
             await GetFirmwareVersionAsync();
+            await GetHardwareVersionAsync();
             await GetCurrentImageNameAsync();
             await GetTotalStorageSizeAsync();
             await GetFreeStorageSizeAsync();
@@ -664,6 +666,13 @@ public class BusyTagDevice(string? portName)
         FirmwareVersion = response.Contains("+FV:") ? response.Split(':').Last() : "";
         FirmwareVersionFloat = float.Parse(FirmwareVersion, CultureInfo.InvariantCulture);
         return FirmwareVersion;
+    }
+
+    public async Task<string> GetHardwareVersionAsync()
+    {
+        var response = await SendCommandAsync("AT+GHV");
+        HardwareVersion = response.Contains("+HV:") ? response.Split(':').Last() : "1.0";
+        return HardwareVersion;
     }
 
     public async Task<string> GetCurrentImageNameAsync()

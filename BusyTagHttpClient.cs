@@ -11,7 +11,7 @@ public class BusyTagHttpClient : IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly string _baseUrl;
-    private readonly string? _authToken;
+    private string? _authToken;
 
     public BusyTagHttpClient(string deviceHost = "192.168.4.1", int port = 80, string? authToken = null)
     {
@@ -25,6 +25,53 @@ public class BusyTagHttpClient : IDisposable
         };
 
         Debug.WriteLine($"BusyTagHttpClient initialized with base URL: {_baseUrl}");
+    }
+
+    /// <summary>
+    /// Fetch the homepage and extract the auth token
+    /// </summary>
+    public async Task<string?> FetchAuthTokenAsync()
+    {
+        try
+        {
+            Debug.WriteLine($"[HTTP] Fetching auth token from {_baseUrl}/");
+
+            var response = await _httpClient.GetAsync("/");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Debug.WriteLine($"[HTTP] Failed to fetch homepage: {response.StatusCode}");
+                return null;
+            }
+
+            var html = await response.Content.ReadAsStringAsync();
+
+            // Parse the token from the HTML (look for "Bearer TOKEN")
+            // Example: -H "Authorization: Bearer <span class='token'>abc123def456</span>"
+            var match = System.Text.RegularExpressions.Regex.Match(
+                html,
+                @"Bearer\s+<span class='token'>([^<]+)</span>"
+            );
+
+            if (match.Success)
+            {
+                var token = match.Groups[1].Value;
+                Debug.WriteLine($"[HTTP] Extracted auth token: {token}");
+
+                // Update the auth token
+                _authToken = token;
+
+                return token;
+            }
+
+            Debug.WriteLine($"[HTTP] Could not find auth token in homepage");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[HTTP] Exception fetching auth token: {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<AtCommandResponse> SendAtCommandAsync(string command, CancellationToken cancellationToken = default)
@@ -136,6 +183,11 @@ public class BusyTagHttpClient : IDisposable
     public async Task<AtCommandResponse> GetWifiModeAsync()
     {
         return await SendAtCommandAsync("AT+WM?");
+    }
+
+    public async Task<AtCommandResponse> GetHardwareVersionAsync()
+    {
+        return await SendAtCommandAsync("AT+GHV");
     }
 
     public async Task<bool> TestConnectionAsync()
