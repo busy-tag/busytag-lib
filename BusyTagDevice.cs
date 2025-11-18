@@ -1199,7 +1199,7 @@ public class BusyTagDevice(string? portName)
             args.ProgressLevel = 100.0f;
             FileUploadProgress?.Invoke(this, args);
             
-            response = await SendCommandAsync("", 1000, discardInBuffer: false);
+            response = await SendCommandAsync("", 1500, discardInBuffer: false);
             if (response.Contains("OK"))
             {
                 return true; // Success - CancelFileUpload will be called with success=true
