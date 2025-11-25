@@ -88,7 +88,7 @@ public class BusyTagDevice(string? portName)
                 //     }
                 //     catch (Exception ex)
                 //     {
-                //         Trace.WriteLine($"Exception in connection check: {ex.Message}");
+                //         Debug.WriteLine($"Exception in connection check: {ex.Message}");
                 //         Disconnect();
                 //     }
                 // }
@@ -161,7 +161,7 @@ public class BusyTagDevice(string? portName)
         catch (Exception e)
         {
             // ConnectionStateChanged?.Invoke(this, IsConnected);
-            Trace.WriteLine($"Error: {e.Message}");
+            Debug.WriteLine($"Error: {e.Message}");
         }
     }
 
@@ -232,7 +232,7 @@ public class BusyTagDevice(string? portName)
                 catch (Exception ex)
                 {
                     _asyncCommandActive = false;
-                    Trace.WriteLine($"[ERROR] Command '{command}' failed: {ex.Message}");
+                    Debug.WriteLine($"[ERROR] Command '{command}' failed: {ex.Message}");
                     throw new InvalidOperationException($"Command failed: {ex.Message}", ex);
                 }
             }
@@ -308,7 +308,7 @@ public class BusyTagDevice(string? portName)
                 catch (Exception ex)
                 {
                     _asyncCommandActive = false;
-                    Trace.WriteLine($"[SEND BYTES] Exception: {ex.Message}");
+                    Debug.WriteLine($"[SEND BYTES] Exception: {ex.Message}");
                     throw new InvalidOperationException($"Binary operation failed: {ex.Message}", ex);
                 }
             }
@@ -386,13 +386,13 @@ public class BusyTagDevice(string? portName)
         }
         catch (Exception exception)
         {
-            Trace.WriteLine($"[ERROR] sp_DataReceived: {exception.Message}");
+            Debug.WriteLine($"[ERROR] sp_DataReceived: {exception.Message}");
         }
     }
 
     private static void sp_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
     {
-        Trace.WriteLine(e.ToString());
+        Debug.WriteLine(e.ToString());
     }
 
     /// <summary>
@@ -1312,7 +1312,7 @@ public class BusyTagDevice(string? portName)
             var response = await SendCommandAsync($"AT+DF={fileName}", 300);
             if (!response.Contains("OK"))
             {
-                Trace.WriteLine($"Error deleting file: {fileName}");            
+                Debug.WriteLine($"Error deleting file: {fileName}");            
             };
             await GetFreeStorageSizeAsync();
         }
