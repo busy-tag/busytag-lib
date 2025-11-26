@@ -80,9 +80,15 @@ public class BusyTagManager : IDisposable
         {
             return await DiscoverByVidPidWindowsAsync();
         }
-        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.OSDescription.Contains("Darwin"))
+        else if (IsRunningOnMacOS())
         {
             return await DiscoverByVidPidMacOsAsync();
+        }
+        else if (IsRunningOnIOS())
+        {
+            // iOS doesn't support USB device discovery - devices connect via Bluetooth or network
+            _isScanningForDevices = false;
+            return null;
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && EnableExperimentalLinuxSupport)
         {
@@ -95,9 +101,65 @@ public class BusyTagManager : IDisposable
             if (EnableVerboseLogging)
                 Debug.WriteLine("[INFO] Linux platform detected but support is disabled. Set EnableExperimentalLinuxSupport = true to enable experimental support.");
         }
-        
+
         _isScanningForDevices = false;
         return null;
+    }
+
+    private static bool IsRunningOnIOS()
+    {
+        // Use compile-time check for iOS target framework
+#if IOS || __IOS__
+        return true;
+#else
+        // Runtime fallback for non-compile-time detection
+        // Check for iOS-specific indicators
+        var osDesc = RuntimeInformation.OSDescription;
+
+        if (osDesc.Contains("Darwin"))
+        {
+            try
+            {
+                // On iOS, /var/mobile exists; on macOS it doesn't
+                if (Directory.Exists("/var/mobile"))
+                    return true;
+
+                // Check for iOS simulator or device paths
+                var processPath = Environment.ProcessPath ?? "";
+                if (processPath.Contains("/CoreSimulator/") ||
+                    processPath.Contains("/iPhone") ||
+                    processPath.Contains("/iPad"))
+                    return true;
+            }
+            catch
+            {
+                // If we can't check paths, we're likely sandboxed (iOS)
+            }
+        }
+
+        return false;
+#endif
+    }
+
+    private static bool IsRunningOnMacOS()
+    {
+        // Use compile-time check - MacCatalyst is macOS, not iOS
+#if MACCATALYST || __MACCATALYST__
+        return true;
+#elif IOS || __IOS__
+        return false;
+#else
+        // Runtime fallback
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX) &&
+            !RuntimeInformation.OSDescription.Contains("Darwin"))
+            return false;
+
+        // If iOS is detected, return false
+        if (IsRunningOnIOS())
+            return false;
+
+        return true;
+#endif
     }
 
     private void CheckForDeviceChanges()
@@ -332,6 +394,11 @@ public class BusyTagManager : IDisposable
                     devices[key] = key;
                 }
             }
+        }
+        catch (Exception ex) when (ex.Message.Contains("not supported on this platform"))
+        {
+            // Expected on MacCatalyst - process execution is not supported in sandbox
+            // Fall through silently and return empty devices
         }
         catch (Exception ex)
         {
