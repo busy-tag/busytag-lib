@@ -627,6 +627,107 @@ public class BusyTagCloudClient : IDisposable
     }
 
     /// <summary>
+    /// Send LED pattern to device via cloud
+    /// </summary>
+    /// <param name="patternLines">List of pattern lines to send</param>
+    /// <param name="playAfterSending">Whether to automatically play the pattern after sending</param>
+    /// <param name="loopCount">Number of times to loop (1-254, or 255 for infinite loop)</param>
+    /// <param name="timeoutSeconds">Timeout in seconds for waiting for command completion (0 = don't wait)</param>
+    /// <returns>Command response</returns>
+    public async Task<CloudCommandResponse> SendPatternAsync(
+        List<Util.PatternLine> patternLines,
+        bool playAfterSending = true,
+        int loopCount = 5,
+        int timeoutSeconds = 30)
+    {
+        if (patternLines == null || patternLines.Count == 0)
+        {
+            return new CloudCommandResponse
+            {
+                Success = false,
+                ErrorMessage = "Pattern lines cannot be null or empty"
+            };
+        }
+
+        // Build the AT+CPD command with pattern data
+        // Format: AT+CPD=+CP:ledBits,colorHex,speed,delay\r\n+CP:ledBits,colorHex,speed,delay\r\n...
+        var patternDataParts = new List<string>();
+        foreach (var line in patternLines)
+        {
+            patternDataParts.Add($"+CP:{line.LedBits},{line.Color},{line.Speed},{line.Delay}");
+        }
+
+        var patternData = string.Join("\\r\\n", patternDataParts);
+        var command = $"AT+CPD={patternData}";
+
+        System.Diagnostics.Debug.WriteLine($"[Cloud] Sending pattern with {patternLines.Count} lines");
+        System.Diagnostics.Debug.WriteLine($"[Cloud] Command: {command}");
+
+        // Queue the pattern command
+        var queueResult = await QueueCommandAsync(command, priority: 5);
+
+        if (!queueResult.Success)
+            return queueResult;
+
+        // If playAfterSending is true, queue the play command
+        if (playAfterSending)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Pattern queued, now queueing play command with loop count: {loopCount}");
+            var playCommand = $"AT+PP=1,{loopCount}";
+            await QueueCommandAsync(playCommand, priority: 5);
+        }
+
+        // If timeout is 0, return immediately without waiting
+        if (timeoutSeconds <= 0)
+            return queueResult;
+
+        // Wait for the CPD command to complete
+        var cpdStatus = await WaitForCommandCompletionAsync(
+            queueResult.CommandId,
+            TimeSpan.FromSeconds(timeoutSeconds),
+            TimeSpan.FromSeconds(1)
+        );
+
+        if (cpdStatus != null)
+        {
+            queueResult.Status = cpdStatus.Status;
+            queueResult.ErrorMessage = cpdStatus.Response;
+        }
+
+        return queueResult;
+    }
+
+    /// <summary>
+    /// Play or stop LED pattern on device via cloud
+    /// </summary>
+    /// <param name="play">True to play, false to stop</param>
+    /// <param name="loopCount">Number of times to loop (1-254, or 255 for infinite loop)</param>
+    /// <param name="timeoutSeconds">Timeout in seconds (0 = don't wait)</param>
+    /// <returns>Command response</returns>
+    public async Task<CloudCommandResponse> PlayPatternAsync(bool play, int loopCount = 5, int timeoutSeconds = 30)
+    {
+        var command = $"AT+PP={(play ? 1 : 0)},{loopCount}";
+        var queueResult = await QueueCommandAsync(command, priority: 5);
+
+        if (!queueResult.Success || timeoutSeconds <= 0)
+            return queueResult;
+
+        var status = await WaitForCommandCompletionAsync(
+            queueResult.CommandId,
+            TimeSpan.FromSeconds(timeoutSeconds),
+            TimeSpan.FromSeconds(1)
+        );
+
+        if (status != null)
+        {
+            queueResult.Status = status.Status;
+            queueResult.ErrorMessage = status.Response;
+        }
+
+        return queueResult;
+    }
+
+    /// <summary>
     /// Restart device via cloud
     /// </summary>
     public async Task<CloudCommandResponse> RestartDeviceAsync()
@@ -809,6 +910,22 @@ public class DeviceStatus
     [JsonPropertyName("wifi_connected")]
     [JsonConverter(typeof(IntToBoolConverter))]
     public bool? WifiConnected { get; set; }  // Made nullable since API doesn't return it
+
+    [JsonPropertyName("storage_mounted")]
+    [JsonConverter(typeof(IntToBoolConverter))]
+    public bool? StorageMounted { get; set; }
+
+    [JsonPropertyName("storage_total")]
+    public long? StorageTotal { get; set; }
+
+    [JsonPropertyName("storage_free")]
+    public long? StorageFree { get; set; }
+
+    [JsonPropertyName("brightness")]
+    public int? Brightness { get; set; }
+
+    [JsonPropertyName("current_image")]
+    public string? CurrentImage { get; set; }
 
     [JsonPropertyName("image_count")]
     public int? ImageCount { get; set; }
