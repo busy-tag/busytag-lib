@@ -35,6 +35,11 @@ public class PatternListCommands
         GetMagentaPulses,
         GetCyanPulses,
         GetWhitePulses,
+        // GetRainbow,
+        // GetFire,
+        // GetSparkle,
+        // GetWave,
+        // GetAlert,
     }
 
     public static readonly Dictionary<PatternName, PatternListItem?> PatternList = new()
@@ -250,6 +255,73 @@ public class PatternListCommands
                 new PatternLine(127, "111111", 150, 10),
             ])
         },
+        // {
+        //     PatternName.GetRainbow, new PatternListItem("Rainbow",
+        //     [
+        //         new PatternLine(127, "FF0000", 80, 20),
+        //         new PatternLine(127, "FF8000", 80, 20),
+        //         new PatternLine(127, "FFFF00", 80, 20),
+        //         new PatternLine(127, "00FF00", 80, 20),
+        //         new PatternLine(127, "00FFFF", 80, 20),
+        //         new PatternLine(127, "0000FF", 80, 20),
+        //         new PatternLine(127, "8000FF", 80, 20),
+        //         new PatternLine(127, "FF00FF", 80, 20),
+        //     ])
+        // },
+        // {
+        //     PatternName.GetFire, new PatternListItem("Fire",
+        //     [
+        //         new PatternLine(127, "FF3000", 30, 5),
+        //         new PatternLine(85, "FF0000", 20, 3),
+        //         new PatternLine(42, "FF6000", 25, 4),
+        //         new PatternLine(127, "FF3000", 30, 5),
+        //         new PatternLine(28, "CC2000", 15, 3),
+        //         new PatternLine(99, "FF0000", 20, 4),
+        //         new PatternLine(127, "FF6000", 25, 5),
+        //         new PatternLine(54, "FF3000", 30, 3),
+        //     ])
+        // },
+        // {
+        //     PatternName.GetSparkle, new PatternListItem("Sparkle",
+        //     [
+        //         new PatternLine(129, "FFFFFF", 2, 5),
+        //         new PatternLine(255, "000000", 2, 3),
+        //         new PatternLine(136, "FFFFFF", 2, 5),
+        //         new PatternLine(255, "000000", 2, 3),
+        //         new PatternLine(160, "FFFFFF", 2, 5),
+        //         new PatternLine(255, "000000", 2, 3),
+        //         new PatternLine(132, "FFFFFF", 2, 5),
+        //         new PatternLine(255, "000000", 2, 3),
+        //         new PatternLine(192, "FFFFFF", 2, 5),
+        //         new PatternLine(255, "000000", 2, 3),
+        //         new PatternLine(130, "FFFFFF", 2, 5),
+        //         new PatternLine(255, "000000", 2, 3),
+        //         new PatternLine(144, "FFFFFF", 2, 5),
+        //         new PatternLine(255, "000000", 2, 8),
+        //     ])
+        // },
+        // {
+        //     PatternName.GetWave, new PatternListItem("Wave",
+        //     [
+        //         new PatternLine(129, "0080FF", 50, 0),
+        //         new PatternLine(130, "0080FF", 50, 0),
+        //         new PatternLine(132, "0080FF", 50, 0),
+        //         new PatternLine(136, "0080FF", 50, 0),
+        //         new PatternLine(144, "0080FF", 50, 0),
+        //         new PatternLine(160, "0080FF", 50, 0),
+        //         new PatternLine(192, "0080FF", 50, 10),
+        //     ])
+        // },
+        // {
+        //     PatternName.GetAlert, new PatternListItem("Alert",
+        //     [
+        //         new PatternLine(127, "FF0000", 3, 10),
+        //         new PatternLine(127, "FFFF00", 3, 10),
+        //         new PatternLine(127, "FF0000", 3, 10),
+        //         new PatternLine(127, "FFFF00", 3, 10),
+        //         new PatternLine(127, "000000", 3, 30),
+        //     ])
+        // },
     };
 
     public PatternListItem? PatternListByKey(PatternName var)

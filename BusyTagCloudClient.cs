@@ -43,6 +43,53 @@ public class BusyTagCloudClient : IDisposable
     private readonly string _baseUrl;
     private readonly string _deviceId;
 
+    // Shared WebSocket client for real-time command notifications
+    private static BusyTagWebSocketClient? _sharedWebSocket;
+    private static readonly object _wsLock = new();
+    private static readonly Dictionary<string, TaskCompletionSource<CommandUpdatedData>> _pendingCommands = new();
+
+    /// <summary>
+    /// Set the shared WebSocket client for real-time command updates
+    /// </summary>
+    public static void SetSharedWebSocket(BusyTagWebSocketClient? webSocket)
+    {
+        lock (_wsLock)
+        {
+            if (_sharedWebSocket != null)
+            {
+                _sharedWebSocket.CommandUpdated -= OnSharedCommandUpdated;
+            }
+
+            _sharedWebSocket = webSocket;
+
+            if (_sharedWebSocket != null)
+            {
+                _sharedWebSocket.CommandUpdated += OnSharedCommandUpdated;
+                System.Diagnostics.Debug.WriteLine("[Cloud] Shared WebSocket client set for command notifications");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether WebSocket is available for command notifications
+    /// </summary>
+    public static bool IsWebSocketAvailable => _sharedWebSocket?.IsConnected ?? false;
+
+    private static void OnSharedCommandUpdated(object? sender, CommandUpdatedEventArgs e)
+    {
+        var data = e.Data;
+        System.Diagnostics.Debug.WriteLine($"[Cloud/WS] Command updated: {data.CommandId} -> {data.Status}");
+
+        lock (_wsLock)
+        {
+            if (_pendingCommands.TryGetValue(data.CommandId, out var tcs))
+            {
+                tcs.TrySetResult(data);
+                _pendingCommands.Remove(data.CommandId);
+            }
+        }
+    }
+
     public BusyTagCloudClient(string baseUrl, string deviceId)
     {
         _baseUrl = baseUrl.TrimEnd('/');
@@ -159,7 +206,8 @@ public class BusyTagCloudClient : IDisposable
     }
 
     /// <summary>
-    /// Wait for a command to complete and return its response
+    /// Wait for a command to complete and return its response.
+    /// Uses WebSocket for real-time notifications when available, falls back to polling.
     /// </summary>
     public async Task<CloudCommandStatus?> WaitForCommandCompletionAsync(
         string commandId,
@@ -168,10 +216,29 @@ public class BusyTagCloudClient : IDisposable
     {
         var interval = pollInterval ?? TimeSpan.FromSeconds(2);
         var endTime = DateTime.UtcNow.Add(timeout);
-        int checkCount = 0;
 
         System.Diagnostics.Debug.WriteLine($"[Cloud] Waiting for command completion: {commandId}");
+
+        // Try WebSocket-based waiting if available
+        if (IsWebSocketAvailable)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Using WebSocket for command notifications");
+            var wsResult = await WaitForCommandViaWebSocketAsync(commandId, timeout);
+            if (wsResult != null)
+            {
+                return wsResult;
+            }
+            // Fall through to polling if WebSocket didn't get the result
+            System.Diagnostics.Debug.WriteLine($"[Cloud] WebSocket wait returned null, falling back to polling");
+        }
+        else
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] WebSocket not available, using polling");
+        }
+
+        // Polling fallback
         System.Diagnostics.Debug.WriteLine($"[Cloud] Timeout: {timeout.TotalSeconds}s, Poll interval: {interval.TotalSeconds}s");
+        int checkCount = 0;
 
         while (DateTime.UtcNow < endTime)
         {
@@ -198,6 +265,52 @@ public class BusyTagCloudClient : IDisposable
 
         System.Diagnostics.Debug.WriteLine($"[Cloud] Command timed out after {checkCount} checks");
         return null; // Timeout
+    }
+
+    /// <summary>
+    /// Wait for command completion via WebSocket notification
+    /// </summary>
+    private async Task<CloudCommandStatus?> WaitForCommandViaWebSocketAsync(string commandId, TimeSpan timeout)
+    {
+        var tcs = new TaskCompletionSource<CommandUpdatedData>();
+
+        lock (_wsLock)
+        {
+            _pendingCommands[commandId] = tcs;
+        }
+
+        try
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            cts.Token.Register(() => tcs.TrySetCanceled());
+
+            var result = await tcs.Task;
+
+            System.Diagnostics.Debug.WriteLine($"[Cloud/WS] Received command result: {result.Status}, Success={result.Success}");
+
+            // Convert WebSocket data to CloudCommandStatus
+            return new CloudCommandStatus
+            {
+                CommandId = result.CommandId,
+                DeviceId = result.DeviceId,
+                Status = result.Status,
+                Success = result.Success,
+                Response = result.Response,
+                CompletedAt = result.CompletedAt
+            };
+        }
+        catch (TaskCanceledException)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cloud/WS] WebSocket wait timed out for command {commandId}");
+            return null;
+        }
+        finally
+        {
+            lock (_wsLock)
+            {
+                _pendingCommands.Remove(commandId);
+            }
+        }
     }
 
     /// <summary>
