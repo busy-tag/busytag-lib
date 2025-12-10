@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using BusyTag.Lib.Util;
 
 namespace BusyTag.Lib;
 
@@ -183,13 +184,13 @@ public class BusyTagCloudClient : IDisposable
             var content = await response.Content.ReadAsStringAsync();
             System.Diagnostics.Debug.WriteLine($"[Cloud] Response body: {content}");
 
-            var options = new System.Text.Json.JsonSerializerOptions
+            var options = new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             };
             options.Converters.Add(new IntToBoolConverter());
 
-            var status = System.Text.Json.JsonSerializer.Deserialize<CloudCommandStatus>(content, options);
+            var status = JsonSerializer.Deserialize<CloudCommandStatus>(content, options);
 
             if (status != null)
             {
@@ -555,7 +556,7 @@ public class BusyTagCloudClient : IDisposable
             var imageContent = new ByteArrayContent(imageData);
 
             // Set correct MIME type based on file extension
-            var extension = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
+            var extension = Path.GetExtension(fileName).ToLowerInvariant();
             var mimeType = extension switch
             {
                 ".png" => "image/png",
@@ -619,19 +620,13 @@ public class BusyTagCloudClient : IDisposable
             var response = await _httpClient.GetAsync(imageUrl);
             if (!response.IsSuccessStatusCode)
             {
-#if ANDROID
-                Android.Util.Log.Debug("BusyTagCloudClient", $"DownloadImageAsync failed: HTTP {response.StatusCode} for URL {imageUrl}");
-#endif
                 return null;
             }
 
             return await response.Content.ReadAsByteArrayAsync();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-#if ANDROID
-            Android.Util.Log.Debug("BusyTagCloudClient", $"DownloadImageAsync exception: {ex.Message} for URL {imageUrl}");
-#endif
             return null;
         }
     }
@@ -748,7 +743,7 @@ public class BusyTagCloudClient : IDisposable
     /// <param name="timeoutSeconds">Timeout in seconds for waiting for command completion (0 = don't wait)</param>
     /// <returns>Command response</returns>
     public async Task<CloudCommandResponse> SendPatternAsync(
-        List<Util.PatternLine> patternLines,
+        List<PatternLine>? patternLines,
         bool playAfterSending = true,
         int loopCount = 5,
         int timeoutSeconds = 30)
@@ -925,7 +920,7 @@ public class BusyTagCloudClient : IDisposable
 
     public void Dispose()
     {
-        _httpClient?.Dispose();
+        _httpClient.Dispose();
     }
 }
 

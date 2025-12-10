@@ -62,7 +62,6 @@ public class BusyTagDevice(string? portName)
     private bool _writeRawData;
     private bool _isPlayingPattern = false;
     private bool _sendingFile = false;
-    private bool _skipChecking = false;
     private readonly CancellationTokenSource _ctsForConnection = new();
     private CancellationTokenSource _ctsForFileSending = new();
 
@@ -78,8 +77,6 @@ public class BusyTagDevice(string? portName)
                     Disconnect();
                 }
 #if MACCATALYST
-                // if (!_skipChecking)
-                // {
                 //     try
                 //     {
                 //         // Send a simple command to check if the device is responsive
@@ -92,8 +89,6 @@ public class BusyTagDevice(string? portName)
                 //         Disconnect();
                 //     }
                 // }
-                //
-                // _skipChecking = false;
 #endif
             }
         }, token);
@@ -588,7 +583,6 @@ public class BusyTagDevice(string? portName)
                     // else 
                     if (parts[0].Equals("+evn"))
                     {
-                        _skipChecking = true;
                         var args = parts[1].Split(',');
                         if (args.Length >= 2)
                         {
