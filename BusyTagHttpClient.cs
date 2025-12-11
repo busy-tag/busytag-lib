@@ -1,5 +1,3 @@
-using System.Net.Http;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -203,6 +201,117 @@ public class BusyTagHttpClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Start a Wi-Fi network scan on the device.
+    /// The scan runs asynchronously on the device.
+    /// </summary>
+    public async Task<bool> StartWifiScanAsync()
+    {
+        var response = await SendAtCommandAsync("AT+WSCAN");
+        return response.IsSuccess && (response.Data?.Contains("OK") ?? false);
+    }
+
+    /// <summary>
+    /// Get Wi-Fi scan results from the device.
+    /// Returns a list of available networks with SSID, channel, RSSI, and auth mode.
+    /// </summary>
+    public async Task<WifiScanResult> GetWifiScanResultsAsync()
+    {
+        var response = await SendAtCommandAsync("AT+WSCAN?");
+
+        var result = new WifiScanResult();
+
+        if (!response.IsSuccess || string.IsNullOrEmpty(response.Data))
+        {
+            result.ErrorMessage = response.Message ?? "Failed to get scan results";
+            return result;
+        }
+
+        var data = response.Data.Trim();
+
+        // Check if the scan is still in progress
+        if (data.Contains("+WSCAN:BUSY"))
+        {
+            result.IsBusy = true;
+            return result;
+        }
+
+        // Parse results: +WSCAN:<count> followed by +WSCAN:<ssid>,<channel>,<rssi>,<auth>
+        var lines = data.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("+WSCAN:"))
+            {
+                var content = line.Substring(7); // Remove "+WSCAN:"
+
+                // Check if this is the count line (just a number)
+                if (int.TryParse(content, out var count))
+                {
+                    result.TotalCount = count;
+                    continue;
+                }
+
+                // Parse network entry: <ssid>,<channel>,<rssi>,<auth>
+                var parts = content.Split(',');
+                if (parts.Length >= 4)
+                {
+                    var network = new WifiNetwork
+                    {
+                        Ssid = parts[0],
+                        Channel = int.TryParse(parts[1], out var ch) ? ch : 0,
+                        Rssi = int.TryParse(parts[2], out var rssi) ? rssi : -100,
+                        AuthMode = parts[3]
+                    };
+
+                    // Only add non-empty SSIDs
+                    if (!string.IsNullOrWhiteSpace(network.Ssid))
+                    {
+                        result.Networks.Add(network);
+                    }
+                }
+            }
+        }
+
+        result.Success = true;
+        return result;
+    }
+
+    /// <summary>
+    /// Scan for Wi-Fi networks and wait for results.
+    /// Combines StartWifiScanAsync and GetWifiScanResultsAsync with retry logic.
+    /// </summary>
+    public async Task<WifiScanResult> ScanWifiNetworksAsync(int maxWaitMs = 5000, int pollIntervalMs = 500)
+    {
+        // Start the scan
+        var started = await StartWifiScanAsync();
+        if (!started)
+        {
+            return new WifiScanResult { ErrorMessage = "Failed to start Wi-Fi scan" };
+        }
+
+        // Wait a bit for the scan to complete
+        await Task.Delay(1000);
+
+        // Poll for results
+        var stopwatch = Stopwatch.StartNew();
+        WifiScanResult? result = null;
+
+        while (stopwatch.ElapsedMilliseconds < maxWaitMs)
+        {
+            result = await GetWifiScanResultsAsync();
+
+            if (result.Success || !result.IsBusy)
+            {
+                break;
+            }
+
+            await Task.Delay(pollIntervalMs);
+        }
+
+        return result ?? new WifiScanResult { ErrorMessage = "Scan timed out" };
+    }
+
     public void Dispose()
     {
         _httpClient?.Dispose();
@@ -222,4 +331,26 @@ public class AtCommandResponse
 
     [JsonIgnore]
     public bool IsSuccess => Status?.Equals("success", StringComparison.OrdinalIgnoreCase) ?? false;
+}
+
+public class WifiScanResult
+{
+    public bool Success { get; set; }
+    public bool IsBusy { get; set; }
+    public int TotalCount { get; set; }
+    public string? ErrorMessage { get; set; }
+    public List<WifiNetwork> Networks { get; set; } = new();
+}
+
+public class WifiNetwork
+{
+    public string Ssid { get; set; } = string.Empty;
+    public int Channel { get; set; }
+    public int Rssi { get; set; }
+    public string AuthMode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Display string for network selection (includes signal strength indicator)
+    /// </summary>
+    public string DisplayName => $"{Ssid} ({Rssi}dBm)";
 }
