@@ -91,7 +91,7 @@ public class BusyTagWebSocketClient : IDisposable
                 ReconnectionDelay = 2000,
                 ReconnectionDelayMax = 30000, // Max 30 seconds between retries
                 ConnectionTimeout = TimeSpan.FromSeconds(15),
-                // Set Origin header for proxy compatibility (Go proxies require valid Origin)
+                // Set the Origin header for proxy compatibility (Go proxies require valid Origin)
                 ExtraHeaders = new Dictionary<string, string>
                 {
                     { "Origin", "https://greynut.com" }
@@ -255,7 +255,7 @@ public class BusyTagWebSocketClient : IDisposable
     private void OnReconnectFailed(object? sender, EventArgs e)
     {
         System.Diagnostics.Debug.WriteLine($"[WebSocket] Reconnection failed - all attempts exhausted");
-        // Optionally try to manually reconnect after a delay
+        // Optionally, try to manually reconnect after a delay
         _ = Task.Run(async () =>
         {
             await Task.Delay(TimeSpan.FromSeconds(30));

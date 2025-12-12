@@ -7,7 +7,6 @@ using System.Text.Json;
 using BusyTag.Lib.Util;
 using BusyTag.Lib.Util.DevEventArgs;
 
-
 namespace BusyTag.Lib;
 
 // All the code in this file is included in all platforms.
@@ -60,8 +59,8 @@ public class BusyTagDevice(string? portName)
     private readonly List<PatternLine> _patternList = [];
     private bool _asyncCommandActive;
     private bool _writeRawData;
-    private bool _isPlayingPattern = false;
-    private bool _sendingFile = false;
+    private bool _isPlayingPattern;
+    private bool _sendingFile;
     private readonly CancellationTokenSource _ctsForConnection = new();
     private CancellationTokenSource _ctsForFileSending = new();
 
@@ -76,20 +75,6 @@ public class BusyTagDevice(string? portName)
                 {
                     Disconnect();
                 }
-#if MACCATALYST
-                //     try
-                //     {
-                //         // Send a simple command to check if the device is responsive
-                //         _serialPort?.WriteLine("AT\r\n");
-                //         // SendCommand("AT\r\n");
-                //     }
-                //     catch (Exception ex)
-                //     {
-                //         Debug.WriteLine($"Exception in connection check: {ex.Message}");
-                //         Disconnect();
-                //     }
-                // }
-#endif
             }
         }, token);
     }
@@ -129,8 +114,6 @@ public class BusyTagDevice(string? portName)
             await GetFirmwareVersionAsync();
             await GetHardwareVersionAsync();
             await GetCurrentImageNameAsync();
-            await GetTotalStorageSizeAsync();
-            await GetFreeStorageSizeAsync();
             await GetSolidColorAsync();
             await GetDisplayBrightnessAsync();
 
@@ -141,8 +124,17 @@ public class BusyTagDevice(string? portName)
             }
             if (FirmwareVersionFloat > 0.7)
                 await SetAllowedAutoStorageScanAsync(false);
-
+            
+            await GetTotalStorageSizeAsync();
+            await GetFreeStorageSizeAsync();
             await GetFileListAsync();
+
+            // Validate storage integrity shortly after connection (non-blocking)
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(1000); // Wait 1 second after connection
+                await ValidateStorageIntegrityAsync();
+            });
 
             // Only sync the current image immediately for faster connection
             // if (!string.IsNullOrEmpty(CurrentImageName) && !FileExistsInCache(CurrentImageName))
@@ -828,6 +820,72 @@ public class BusyTagDevice(string? portName)
     {
         var response = await SendCommandAsync("AT+FD", 2000);
         return response.Contains("OK");
+    }
+
+    /// <summary>
+    /// Validates storage integrity using multiple checks.
+    /// If corruption is detected, formats the disk to fix it.
+    /// </summary>
+    public async Task ValidateStorageIntegrityAsync()
+    {
+        try
+        {
+            var totalFileSizes = FileList.Sum(f => f.Size);
+            var usedStorageSize = TotalStorageSize - FreeStorageSize;
+            var fileCount = FileList.Count;
+
+            var needsFormat = false;
+            var reason = string.Empty;
+
+            // Check 1: Files exist but used space is zero (or vice versa)
+            if (fileCount > 0 && usedStorageSize <= 0)
+            {
+                needsFormat = true;
+                reason = $"Files exist ({fileCount}) but used space is zero";
+            }
+            else if (fileCount == 0 && usedStorageSize > 0)
+            {
+                // Check 3: No files in list but significant space is used (> 1KB threshold for system overhead)
+                const long minThreshold = 1024; // 1KB threshold for system overhead
+                if (usedStorageSize > minThreshold)
+                {
+                    needsFormat = true;
+                    reason = $"No files but {usedStorageSize} bytes used (threshold: {minThreshold})";
+                }
+            }
+            else if (fileCount > 0 && totalFileSizes > 0)
+            {
+                // Check 2: File sizes sum differs significantly from used space
+                // Allow 10% tolerance or 64KB (whichever is larger) for filesystem overhead
+                var tolerance = Math.Max(usedStorageSize * 0.1, 65536);
+                var difference = Math.Abs(totalFileSizes - usedStorageSize);
+
+                if (difference > tolerance)
+                {
+                    needsFormat = true;
+                    reason = $"Size mismatch: files={totalFileSizes}, used={usedStorageSize}, diff={difference}, tolerance={tolerance}";
+                }
+            }
+
+            if (needsFormat)
+            {
+                Debug.WriteLine($"Storage integrity issue detected: {reason}. Formatting disk...");
+                await FormatDiskAsync();
+                // Refresh storage info after format
+                await GetTotalStorageSizeAsync();
+                await GetFreeStorageSizeAsync();
+                await GetFileListAsync();
+                Debug.WriteLine("Storage formatted and refreshed successfully.");
+            }
+            else
+            {
+                Debug.WriteLine($"Storage integrity OK: {fileCount} files, {totalFileSizes} bytes in files, {usedStorageSize} bytes used");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error validating storage integrity: {ex.Message}");
+        }
     }
 
     public async Task<bool> ActivateFileStorageScanAsync()
