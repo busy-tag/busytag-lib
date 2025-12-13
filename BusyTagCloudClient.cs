@@ -72,9 +72,16 @@ public class BusyTagCloudClient : IDisposable
     }
 
     /// <summary>
-    /// Whether WebSocket is available for command notifications
+    /// Whether WebSocket is available for command notifications.
+    /// Returns false on Windows and macOS since WebSocket is disabled on those platforms (USB is used instead).
     /// </summary>
-    public static bool IsWebSocketAvailable => _sharedWebSocket?.IsConnected ?? false;
+    public static bool IsWebSocketAvailable => BusyTagWebSocketClient.IsPlatformSupported && (_sharedWebSocket?.IsConnected ?? false);
+
+    /// <summary>
+    /// Whether WebSocket is supported on the current platform.
+    /// WebSocket is disabled on Windows and macOS since device communication uses USB on those platforms.
+    /// </summary>
+    public static bool IsWebSocketPlatformSupported => BusyTagWebSocketClient.IsPlatformSupported;
 
     private static void OnSharedCommandUpdated(object? sender, CommandUpdatedEventArgs e)
     {

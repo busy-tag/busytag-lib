@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SocketIOClient;
@@ -5,7 +6,8 @@ using SocketIOClient;
 namespace BusyTag.Lib;
 
 /// <summary>
-/// WebSocket client for real-time updates from BusyTag Cloud Server
+/// WebSocket client for real-time updates from BusyTag Cloud Server.
+/// Note: WebSocket is disabled on Windows and macOS since device communication uses USB on those platforms.
 /// </summary>
 public class BusyTagWebSocketClient : IDisposable
 {
@@ -15,6 +17,29 @@ public class BusyTagWebSocketClient : IDisposable
     private bool _isConnected;
     private bool _isDisposed;
     private readonly HashSet<string> _subscribedDevices = new();
+
+    /// <summary>
+    /// Returns true if WebSocket is supported on the current platform.
+    /// WebSocket is disabled on Windows and macOS since device communication uses USB on those platforms.
+    /// </summary>
+    public static bool IsPlatformSupported
+    {
+        get
+        {
+            // Disable WebSocket on Windows and macOS - USB is used for device communication
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                return false;
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                return false;
+
+#if MACCATALYST || __MACCATALYST__
+            return false;
+#else
+            return true;
+#endif
+        }
+    }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -58,9 +83,10 @@ public class BusyTagWebSocketClient : IDisposable
     public event EventHandler<ImageUploadedEventArgs>? ImageUploaded;
 
     /// <summary>
-    /// Whether the WebSocket is currently connected
+    /// Whether the WebSocket is currently connected.
+    /// Always returns false on Windows and macOS since WebSocket is disabled on those platforms.
     /// </summary>
-    public bool IsConnected => _isConnected;
+    public bool IsConnected => IsPlatformSupported && _isConnected;
 
     /// <summary>
     /// Creates a new WebSocket client for BusyTag Cloud
@@ -74,11 +100,20 @@ public class BusyTagWebSocketClient : IDisposable
     }
 
     /// <summary>
-    /// Connect to the WebSocket server
+    /// Connect to the WebSocket server.
+    /// On Windows and macOS, this method returns immediately without connecting since USB is used for device communication.
     /// </summary>
     public async Task ConnectAsync()
     {
         if (_isDisposed) throw new ObjectDisposedException(nameof(BusyTagWebSocketClient));
+
+        // Skip WebSocket connection on Windows and macOS - USB is used for device communication
+        if (!IsPlatformSupported)
+        {
+            System.Diagnostics.Debug.WriteLine("[WebSocket] Platform not supported (Windows/macOS use USB) - skipping connection");
+            return;
+        }
+
         if (_socket != null && _isConnected) return;
 
         try

@@ -7,3 +7,4 @@ riderModule.iml
 
 *.DotSettings.user
 command_lines_for_publishing.txt
+/.claude/
