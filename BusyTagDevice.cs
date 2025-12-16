@@ -55,7 +55,12 @@ public class BusyTagDevice(string? portName)
     private DriveInfo? _busyTagDrive;
     
     private string _currentUploadFileName = string.Empty;
-    
+
+    /// <summary>
+    /// Gets the filename currently being uploaded, or empty if no upload in progress.
+    /// </summary>
+    public string CurrentUploadFileName => _currentUploadFileName;
+
     private readonly List<PatternLine> _patternList = [];
     private bool _asyncCommandActive;
     private bool _writeRawData;
@@ -1051,6 +1056,7 @@ public class BusyTagDevice(string? portName)
     {
         // Validate filename length before proceeding
         var fileName = Path.GetFileName(sourcePath);
+        _currentUploadFileName = fileName; // Track current upload for FileUploadFinished event
         // Saving in cached dir
         var destFilePath = Path.Combine(CachedFileDirPath, fileName);
         // if (!FileExistsInCache(fileName))
