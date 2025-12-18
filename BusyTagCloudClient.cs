@@ -494,6 +494,61 @@ public class BusyTagCloudClient : IDisposable
     }
 
     /// <summary>
+    /// Send heartbeat to cloud server to mark device as online
+    /// </summary>
+    public async Task<bool> SendHeartbeatAsync(DeviceHeartbeatData? status = null)
+    {
+        try
+        {
+            var url = $"{_baseUrl}/device/{_deviceId}/heartbeat";
+            System.Diagnostics.Debug.WriteLine($"[Cloud] SendHeartbeatAsync called");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Sending heartbeat for device: {_deviceId}");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] URL: {url}");
+
+            // PHP API expects booleans as integers (0/1)
+            var requestBody = new
+            {
+                status = new
+                {
+                    wifi_connected = (status?.WifiConnected ?? false) ? 1 : 0,
+                    storage_mounted = (status?.StorageMounted ?? true) ? 1 : 0,
+                    storage_total = status?.StorageTotal ?? 0,
+                    storage_free = status?.StorageFree ?? 0,
+                    brightness = status?.Brightness ?? 100,
+                    current_image = status?.CurrentImage ?? ""
+                }
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(requestBody);
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Heartbeat request body: {json}");
+
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Sending POST request...");
+            var response = await _httpClient.PostAsJsonAsync(url, requestBody);
+
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Heartbeat response: {response.StatusCode}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var successContent = await response.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[Cloud] Heartbeat success: {successContent}");
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[Cloud] Heartbeat failed: {errorContent}");
+            }
+
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Heartbeat exception: {ex.GetType().Name}: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Heartbeat stack trace: {ex.StackTrace}");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Check device status on cloud
     /// </summary>
     public async Task<DeviceStatus?> GetDeviceStatusAsync()
@@ -1101,4 +1156,17 @@ public class CloudImageUploadResult
 
     [JsonPropertyName("message")]
     public string? Message { get; set; }
+}
+
+/// <summary>
+/// Data for device heartbeat status update
+/// </summary>
+public class DeviceHeartbeatData
+{
+    public bool WifiConnected { get; set; }
+    public bool StorageMounted { get; set; } = true;
+    public long StorageTotal { get; set; }
+    public long StorageFree { get; set; }
+    public int Brightness { get; set; } = 100;
+    public string CurrentImage { get; set; } = string.Empty;
 }

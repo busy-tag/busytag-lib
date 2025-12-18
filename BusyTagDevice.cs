@@ -1062,7 +1062,8 @@ public class BusyTagDevice(string? portName)
         // if (!FileExistsInCache(fileName))
             File.Copy(sourcePath, destFilePath, true);
         _sendingFile = true;
-        
+        _currentUploadFileName = fileName;
+
         var args = new UploadProgressArgs
         {
             FileName = fileName,
