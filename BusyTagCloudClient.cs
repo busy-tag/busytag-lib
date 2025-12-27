@@ -1097,6 +1097,24 @@ public class DeviceStatus
     [JsonPropertyName("current_image")]
     public string? CurrentImage { get; set; }
 
+    [JsonPropertyName("led_bits")]
+    public int? LedBits { get; set; }
+
+    [JsonPropertyName("led_color_r")]
+    public int? LedColorR { get; set; }
+
+    [JsonPropertyName("led_color_g")]
+    public int? LedColorG { get; set; }
+
+    [JsonPropertyName("led_color_b")]
+    public int? LedColorB { get; set; }
+
+    /// <summary>
+    /// Gets LED color as hex string (RRGGBB format)
+    /// </summary>
+    [JsonIgnore]
+    public string LedColorHex => $"{LedColorR ?? 0:X2}{LedColorG ?? 0:X2}{LedColorB ?? 0:X2}";
+
     [JsonPropertyName("image_count")]
     public int? ImageCount { get; set; }
 
@@ -1169,4 +1187,6 @@ public class DeviceHeartbeatData
     public long StorageFree { get; set; }
     public int Brightness { get; set; } = 100;
     public string CurrentImage { get; set; } = string.Empty;
+    public int LedBits { get; set; }
+    public string LedColor { get; set; } = "000000";
 }

@@ -517,6 +517,12 @@ public class DeviceUpdateData
 
     [JsonPropertyName("current_image")]
     public string? CurrentImage { get; set; }
+
+    [JsonPropertyName("led_bits")]
+    public int LedBits { get; set; }
+
+    [JsonPropertyName("led_color")]
+    public string? LedColor { get; set; }
 }
 
 public class DeviceRegisteredData
