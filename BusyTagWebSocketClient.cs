@@ -7,7 +7,7 @@ namespace BusyTag.Lib;
 
 /// <summary>
 /// WebSocket client for real-time updates from BusyTag Cloud Server.
-/// Note: WebSocket is disabled on Windows and macOS since device communication uses USB on those platforms.
+/// Used on all platforms for real-time cloud command delivery.
 /// </summary>
 public class BusyTagWebSocketClient : IDisposable
 {
@@ -20,26 +20,9 @@ public class BusyTagWebSocketClient : IDisposable
 
     /// <summary>
     /// Returns true if WebSocket is supported on the current platform.
-    /// WebSocket is disabled on Windows and macOS since device communication uses USB on those platforms.
+    /// WebSocket is enabled on all platforms for cloud sync functionality.
     /// </summary>
-    public static bool IsPlatformSupported
-    {
-        get
-        {
-            // Disable WebSocket on Windows and macOS - USB is used for device communication
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return false;
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                return false;
-
-#if MACCATALYST || __MACCATALYST__
-            return false;
-#else
-            return true;
-#endif
-        }
-    }
+    public static bool IsPlatformSupported => true;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -100,21 +83,25 @@ public class BusyTagWebSocketClient : IDisposable
     }
 
     /// <summary>
-    /// Connect to the WebSocket server.
-    /// On Windows and macOS, this method returns immediately without connecting since USB is used for device communication.
+    /// Connect to the WebSocket server for real-time cloud command notifications.
     /// </summary>
     public async Task ConnectAsync()
     {
         if (_isDisposed) throw new ObjectDisposedException(nameof(BusyTagWebSocketClient));
 
-        // Skip WebSocket connection on Windows and macOS - USB is used for device communication
+        System.Diagnostics.Debug.WriteLine($"[WebSocket] ConnectAsync called, IsPlatformSupported={IsPlatformSupported}");
+
         if (!IsPlatformSupported)
         {
-            System.Diagnostics.Debug.WriteLine("[WebSocket] Platform not supported (Windows/macOS use USB) - skipping connection");
+            System.Diagnostics.Debug.WriteLine("[WebSocket] Platform not supported - skipping connection");
             return;
         }
 
-        if (_socket != null && _isConnected) return;
+        if (_socket != null && _isConnected)
+        {
+            System.Diagnostics.Debug.WriteLine("[WebSocket] Already connected, skipping");
+            return;
+        }
 
         try
         {

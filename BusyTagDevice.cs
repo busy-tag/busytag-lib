@@ -65,7 +65,13 @@ public class BusyTagDevice(string? portName)
     private bool _asyncCommandActive;
     private bool _writeRawData;
     private bool _isPlayingPattern;
+    private bool _isWritingToStorage;
     private bool _sendingFile;
+
+    /// <summary>
+    /// Returns true if the device is currently writing to storage (WIS,1 state)
+    /// </summary>
+    public bool IsWritingToStorage => _isWritingToStorage;
     private readonly CancellationTokenSource _ctsForConnection = new();
     private CancellationTokenSource _ctsForFileSending = new();
 
@@ -603,6 +609,7 @@ public class BusyTagDevice(string? portName)
                             else if (args[0].Equals("WIS"))
                             {
                                 var isWriting = args[1].Trim() != "0";
+                                _isWritingToStorage = isWriting;
                                 if (!isWriting) Thread.Sleep(100);
                                 WritingInStorage?.Invoke(this, isWriting);
                             }

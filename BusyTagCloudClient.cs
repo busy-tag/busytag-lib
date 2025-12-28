@@ -73,13 +73,13 @@ public class BusyTagCloudClient : IDisposable
 
     /// <summary>
     /// Whether WebSocket is available for command notifications.
-    /// Returns false on Windows and macOS since WebSocket is disabled on those platforms (USB is used instead).
+    /// Returns true if a shared WebSocket is connected.
     /// </summary>
     public static bool IsWebSocketAvailable => BusyTagWebSocketClient.IsPlatformSupported && (_sharedWebSocket?.IsConnected ?? false);
 
     /// <summary>
     /// Whether WebSocket is supported on the current platform.
-    /// WebSocket is disabled on Windows and macOS since device communication uses USB on those platforms.
+    /// WebSocket is enabled on all platforms for cloud sync functionality.
     /// </summary>
     public static bool IsWebSocketPlatformSupported => BusyTagWebSocketClient.IsPlatformSupported;
 
@@ -107,6 +107,89 @@ public class BusyTagCloudClient : IDisposable
             Timeout = TimeSpan.FromSeconds(30)
         };
         _httpClient.DefaultRequestHeaders.Add("X-Device-Key", deviceId);
+    }
+
+    /// <summary>
+    /// Get pending commands for the device (like firmware does when polling cloud)
+    /// </summary>
+    /// <param name="limit">Maximum number of commands to fetch (default 20, max 50)</param>
+    public async Task<List<PendingCloudCommand>> GetPendingCommandsAsync(int limit = 20)
+    {
+        try
+        {
+            var url = $"{_baseUrl}/device/{_deviceId}/commands/pending?limit={limit}";
+            System.Diagnostics.Debug.WriteLine($"[Cloud] GET {url}");
+
+            var response = await _httpClient.GetAsync(url);
+
+            System.Diagnostics.Debug.WriteLine($"[Cloud] GetPendingCommands response: {response.StatusCode}");
+
+            // 204 No Content means no pending commands
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+            {
+                return new List<PendingCloudCommand>();
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[Cloud] GetPendingCommands error: {errorContent}");
+                return new List<PendingCloudCommand>();
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            System.Diagnostics.Debug.WriteLine($"[Cloud] GetPendingCommands response: {content}");
+
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            // API returns array of commands
+            var commands = JsonSerializer.Deserialize<List<PendingCloudCommand>>(content, options);
+            return commands ?? new List<PendingCloudCommand>();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] GetPendingCommands exception: {ex.Message}");
+            return new List<PendingCloudCommand>();
+        }
+    }
+
+    /// <summary>
+    /// Send command execution response back to cloud
+    /// </summary>
+    public async Task<bool> SendCommandResponseAsync(string commandId, bool success, string response)
+    {
+        try
+        {
+            var url = $"{_baseUrl}/device/{_deviceId}/commands/{commandId}/response";
+            System.Diagnostics.Debug.WriteLine($"[Cloud] POST {url}");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Response: success={success}, response={response}");
+
+            var requestBody = new
+            {
+                success = success,
+                response = response
+            };
+
+            var httpResponse = await _httpClient.PostAsJsonAsync(url, requestBody);
+
+            System.Diagnostics.Debug.WriteLine($"[Cloud] SendCommandResponse status: {httpResponse.StatusCode}");
+
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                var errorContent = await httpResponse.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[Cloud] SendCommandResponse error: {errorContent}");
+            }
+
+            return httpResponse.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] SendCommandResponse exception: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>
@@ -494,7 +577,8 @@ public class BusyTagCloudClient : IDisposable
     }
 
     /// <summary>
-    /// Send heartbeat to cloud server to mark device as online
+    /// Send heartbeat to cloud server to mark device as online.
+    /// Format matches firmware: device_id, timestamp at root; status object with all device info.
     /// </summary>
     public async Task<bool> SendHeartbeatAsync(DeviceHeartbeatData? status = null)
     {
@@ -505,9 +589,12 @@ public class BusyTagCloudClient : IDisposable
             System.Diagnostics.Debug.WriteLine($"[Cloud] Sending heartbeat for device: {_deviceId}");
             System.Diagnostics.Debug.WriteLine($"[Cloud] URL: {url}");
 
-            // PHP API expects booleans as integers (0/1)
+            // Match firmware format - use integers for booleans (MySQL expects 0/1)
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             var requestBody = new
             {
+                device_id = _deviceId,
+                timestamp = timestamp,
                 status = new
                 {
                     wifi_connected = (status?.WifiConnected ?? false) ? 1 : 0,
@@ -515,7 +602,9 @@ public class BusyTagCloudClient : IDisposable
                     storage_total = status?.StorageTotal ?? 0,
                     storage_free = status?.StorageFree ?? 0,
                     brightness = status?.Brightness ?? 100,
-                    current_image = status?.CurrentImage ?? ""
+                    current_image = status?.CurrentImage ?? "",
+                    led_bits = status?.LedBits ?? 0,
+                    led_color = status?.LedColor ?? "000000"
                 }
             };
 
@@ -1189,4 +1278,22 @@ public class DeviceHeartbeatData
     public string CurrentImage { get; set; } = string.Empty;
     public int LedBits { get; set; }
     public string LedColor { get; set; } = "000000";
+}
+
+/// <summary>
+/// A pending command from cloud that needs to be executed
+/// </summary>
+public class PendingCloudCommand
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("command")]
+    public string Command { get; set; } = string.Empty;
+
+    [JsonPropertyName("priority")]
+    public int Priority { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public long CreatedAt { get; set; }
 }
