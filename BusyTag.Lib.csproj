@@ -21,8 +21,8 @@
 
         <!-- Package Metadata -->
         <Title>BusyTag Device Management Library</Title>
-        <Authors>BUSY TAG SIA</Authors>
-        <Company>BUSY TAG SIA</Company>
+        <Authors>SIA BUSY TAG</Authors>
+        <Company>SIA BUSY TAG</Company>
         <Product>Busy Tag</Product>
         <Description>A comprehensive library for managing Busy Tag devices via serial communication on Windows and macOS. Supports device discovery, file management, LED control, and pattern configuration.</Description>
         <Summary>Library for Busy Tag device management and control on Windows and macOS</Summary>
@@ -36,7 +36,7 @@
 
         <!-- Legal -->
         <PackageLicenseFile>LICENSE</PackageLicenseFile>
-        <Copyright>Copyright © 2025 BUSY TAG SIA</Copyright>
+        <Copyright>Copyright © 2025 SIA BUSY TAG</Copyright>
 
         <!-- Package Icon (optional) -->
         <PackageIcon>icon.png</PackageIcon>

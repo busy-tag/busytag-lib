@@ -12,7 +12,7 @@ namespace BusyTag.Lib;
 // All the code in this file is included in all platforms.
 public class BusyTagDevice(string? portName)
 {
-    private const int MaxFilenameLength = 40; // TODO: Need to recheck this
+    private const int MaxFilenameLength = 50; // TODO: Need to recheck this
     public event EventHandler<bool>? ConnectionStateChanged;
     public event EventHandler<bool>? ReceivedDeviceBasicInformation;
     public event EventHandler<LedArgs>? ReceivedSolidColor;
@@ -647,7 +647,7 @@ public class BusyTagDevice(string? portName)
     public async Task<string> GetManufactureNameAsync()
     {
         var response = await SendCommandAsync("AT+GMN");
-        ManufactureName = response.Contains("+MN:") ? response.Split(':').Last() : "BUSY TAG SIA";
+        ManufactureName = response.Contains("+MN:") ? response.Split(':').Last() : "SIA BUSY TAG";
         return ManufactureName;
     }
 
