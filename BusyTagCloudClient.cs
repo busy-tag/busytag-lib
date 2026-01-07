@@ -1069,6 +1069,46 @@ public class BusyTagCloudClient : IDisposable
         return queueResult;
     }
 
+    /// <summary>
+    /// Send a device event to the cloud (e.g., DL_START, DL_COMPLETE)
+    /// Used to track file download/upload progress for USB devices with CloudSync enabled
+    /// </summary>
+    /// <param name="eventType">Event type (e.g., "DL_START", "DL_COMPLETE")</param>
+    /// <param name="eventData">Event data (e.g., filename for DL_START, "filename,size" for DL_COMPLETE)</param>
+    /// <returns>True if event was sent successfully</returns>
+    public async Task<bool> SendEventAsync(string eventType, string? eventData = null)
+    {
+        try
+        {
+            var url = $"{_baseUrl}/device/{_deviceId}/events";
+            System.Diagnostics.Debug.WriteLine($"[Cloud] POST {url}");
+            System.Diagnostics.Debug.WriteLine($"[Cloud] Event: type={eventType}, data={eventData}");
+
+            var requestBody = new
+            {
+                event_type = eventType,
+                event_data = eventData ?? string.Empty
+            };
+
+            var response = await _httpClient.PostAsJsonAsync(url, requestBody);
+
+            System.Diagnostics.Debug.WriteLine($"[Cloud] SendEvent response: {response.StatusCode}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                System.Diagnostics.Debug.WriteLine($"[Cloud] SendEvent error: {errorContent}");
+            }
+
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Cloud] SendEvent exception: {ex.Message}");
+            return false;
+        }
+    }
+
     public void Dispose()
     {
         _httpClient.Dispose();
