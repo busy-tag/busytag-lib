@@ -350,7 +350,7 @@ public class WifiNetwork
     public string AuthMode { get; set; } = string.Empty;
 
     /// <summary>
-    /// Display string for network selection (includes signal strength indicator)
+    /// Display string for network selection (includes signal strength and security type)
     /// </summary>
-    public string DisplayName => $"{Ssid} ({Rssi}dBm)";
+    public string DisplayName => $"{Ssid} ({Rssi}dBm, {AuthMode})";
 }
