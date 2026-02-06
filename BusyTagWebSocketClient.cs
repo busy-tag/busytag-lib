@@ -74,7 +74,7 @@ public class BusyTagWebSocketClient : IDisposable
     /// <summary>
     /// Creates a new WebSocket client for BusyTag Cloud
     /// </summary>
-    /// <param name="serverUrl">WebSocket server URL (e.g., https://greynut.com)</param>
+    /// <param name="serverUrl">WebSocket server URL (e.g., https://iot.busytag.com)</param>
     /// <param name="socketPath">Optional Socket.IO path (default: /socket.io)</param>
     public BusyTagWebSocketClient(string serverUrl, string? socketPath = null)
     {
@@ -116,7 +116,7 @@ public class BusyTagWebSocketClient : IDisposable
                 // Set the Origin header for proxy compatibility (Go proxies require valid Origin)
                 ExtraHeaders = new Dictionary<string, string>
                 {
-                    { "Origin", "https://greynut.com" }
+                    { "Origin", "https://iot.busytag.com" }
                 }
             };
 
