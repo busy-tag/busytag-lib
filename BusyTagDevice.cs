@@ -202,7 +202,10 @@ public class BusyTagDevice(string? portName)
     private async Task<string> SendCommandAsync(string command, int timeoutMs = 150, bool waitForFirstResponse = true,
         bool discardInBuffer = true)
     {
-        if(_asyncCommandActive || _writeRawData) return string.Empty;
+        if(_asyncCommandActive || _writeRawData)
+        {
+            return string.Empty;
+        }
         if (!IsConnected)
         {
             Disconnect();
@@ -241,11 +244,19 @@ public class BusyTagDevice(string? portName)
 
             while ((DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
             {
-                if (GetBufferCount() > 0)
+                // Wait for data using semaphore (more reliable than polling buffer count)
+                var remainingTimeout = timeoutMs - (int)(DateTime.Now - startTime).TotalMilliseconds;
+                if (remainingTimeout <= 0) break;
+
+                var dataAvailable = await _dataAvailableSemaphore.WaitAsync(Math.Min(remainingTimeout, 20));
+
+                if (dataAvailable || GetBufferCount() > 0)
                 {
-                    Debug.WriteLine($"Buffer has {GetBufferCount()} bytes");
-                    var data = await ReadStringFromBufferAsync(50);
-                    response.Append(data);
+                    // Read all available data from the buffer
+                    while (_dataBuffer.TryDequeue(out byte b))
+                    {
+                        response.Append((char)b);
+                    }
 
                     var responseStr = response.ToString();
                     if (responseStr.Contains("OK\r\n") || responseStr.Contains("ERROR:") ||
@@ -257,10 +268,8 @@ public class BusyTagDevice(string? portName)
                         return responseStr.Trim();
                     }
 
-                    if (waitForFirstResponse) break;
+                    if (waitForFirstResponse && responseStr.Length > 0) break;
                 }
-
-                await Task.Delay(1);
             }
 
             result = response.ToString().Trim();
@@ -696,6 +705,7 @@ public class BusyTagDevice(string? portName)
         }
         else
         {
+            if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
             FreeStorageSize = _busyTagDrive?.TotalFreeSpace ?? 0;
         }
 
@@ -713,6 +723,7 @@ public class BusyTagDevice(string? portName)
         }
         else
         {
+            if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
             TotalStorageSize = _busyTagDrive?.TotalSize ?? 0;
         }
 
@@ -849,15 +860,21 @@ public class BusyTagDevice(string? portName)
             var needsFormat = false;
             var reason = string.Empty;
 
-            // Check 1: Files exist but used space is zero (or vice versa)
-            if (fileCount > 0 && usedStorageSize <= 0)
+            // Check 0: Total storage size is 0 (disk not readable/corrupted)
+            if (TotalStorageSize <= 0)
+            {
+                needsFormat = true;
+                reason = "Total storage size is 0KB - disk not readable or corrupted";
+            }
+            // Check 1: Files exist, but used space is zero (or vice versa)
+            else if (fileCount > 0 && usedStorageSize <= 0)
             {
                 needsFormat = true;
                 reason = $"Files exist ({fileCount}) but used space is zero";
             }
             else if (fileCount == 0 && usedStorageSize > 0)
             {
-                // Check 3: No files in list but significant space is used (> 1KB threshold for system overhead)
+                // Check 3: No files in the list, but significant space is used (> 1KB threshold for system overhead)
                 const long minThreshold = 1024; // 1KB threshold for system overhead
                 if (usedStorageSize > minThreshold)
                 {
@@ -867,7 +884,7 @@ public class BusyTagDevice(string? portName)
             }
             else if (fileCount > 0 && totalFileSizes > 0)
             {
-                // Check 2: File sizes sum differs significantly from used space
+                // Check 2: A file sizes sum differs significantly from used space
                 // Allow 10% tolerance or 64KB (whichever is larger) for filesystem overhead
                 var tolerance = Math.Max(usedStorageSize * 0.1, 65536);
                 var difference = Math.Abs(totalFileSizes - usedStorageSize);
@@ -1044,14 +1061,19 @@ public class BusyTagDevice(string? portName)
             // Debug.WriteLine($"drive:{d.Name}");
             if (d == null) continue;
             if (!d.IsReady) continue;
+            // Debug.WriteLine($"drive:{d.Name} - ready");
             var path = Path.Combine(d.Name, "readme.txt");
             if (!File.Exists(path)) continue;
+            // Debug.WriteLine($"path:{path} - file exists");
 
             // Open the file to read from.
             using var sr = File.OpenText(path);
+            // Debug.WriteLine($"LocalHostAddress: {LocalHostAddress}");
             while (sr.ReadLine() is { } s)
             {
+                // Debug.WriteLine($"readme.txt line: {s}");
                 if (!s.Contains(LocalHostAddress)) continue;
+                // Debug.WriteLine($"found drive:{d.Name} - contains {LocalHostAddress}");
                 return d;
             }
         }
@@ -1111,10 +1133,16 @@ public class BusyTagDevice(string? portName)
             return;
         }
 
-        if (_busyTagDrive == null) _busyTagDrive = FindBusyTagDrive();
-        if (_busyTagDrive == null) 
+        if (_busyTagDrive == null)
         {
-            CancelFileUpload(false, UploadErrorType.DeviceError, 
+            // Try to enable USB mass storage and find the drive with retries
+            await SetUsbMassStorageActiveAsync(true);
+            await Task.Delay(100);
+            _busyTagDrive = FindBusyTagDrive();
+        }
+        if (_busyTagDrive == null)
+        {
+            CancelFileUpload(false, UploadErrorType.DeviceError,
                 "Cannot find BusyTag drive for file transfer");
             return;
         }
