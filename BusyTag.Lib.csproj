@@ -83,6 +83,14 @@
         <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
     </PropertyGroup>
 
+    <!-- Mac Catalyst: IOKit USB Bulk Transfer native framework -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net9.0-maccatalyst'">
+        <NativeReference Include="Platforms\MacCatalyst\BusyTagUSBDriver.framework">
+            <Kind>Framework</Kind>
+            <SmartLink>True</SmartLink>
+        </NativeReference>
+    </ItemGroup>
+
     <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0-android'">
         <SupportedOSPlatformVersion>21.0</SupportedOSPlatformVersion>
     </PropertyGroup>

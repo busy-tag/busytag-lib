@@ -1,0 +1,5 @@
+framework module BusyTagUSBDriver {
+    umbrella header "BusyTagUSBDriver.h"
+    export *
+    module * { export * }
+}

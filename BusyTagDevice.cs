@@ -32,11 +32,22 @@ public class BusyTagDevice(string? portName)
     private DeviceConfig _deviceConfig = new();
     public string? PortName { get; } = portName;
 
+#if MACCATALYST
+    private Platforms.MacCatalyst.IOKitUsbTransport? _ioKitTransport;
+    private bool _useIOKit;
+#endif
+
     // Centralized data buffer - all serial data flows through sp_DataReceived
     private readonly ConcurrentQueue<byte> _dataBuffer = new();
     private readonly SemaphoreSlim _dataAvailableSemaphore = new(0);
 
+#if MACCATALYST
+    public bool IsConnected => _useIOKit
+        ? (_ioKitTransport?.IsConnected ?? false)
+        : _serialPort is { IsOpen: true };
+#else
     public bool IsConnected => _serialPort is { IsOpen: true };
+#endif
 
     public string DeviceName { get; private set; } = string.Empty;
     public string ManufactureName { get; private set; } = string.Empty;
@@ -93,6 +104,60 @@ public class BusyTagDevice(string? portName)
 
     public async Task Connect()
     {
+#if MACCATALYST
+        // Try IOKit USB Bulk Transfer first (much faster than serial port)
+        try
+        {
+            Debug.WriteLine("[IOKit] Attempting USB Bulk Transfer connection...");
+            _ioKitTransport = new Platforms.MacCatalyst.IOKitUsbTransport();
+            _ioKitTransport.DataReceived += IOKit_DataReceived;
+            _ioKitTransport.ConnectionChanged += IOKit_ConnectionChanged;
+            _ioKitTransport.StartMonitoring();
+
+            // Wait for connection (monitoring triggers async connection via IOKit notifications)
+            var timeout = DateTime.Now.AddSeconds(5);
+            while (!(_ioKitTransport?.IsConnected ?? false) && DateTime.Now < timeout)
+            {
+                await Task.Delay(100);
+            }
+
+            if (_ioKitTransport?.IsConnected == true)
+            {
+                _useIOKit = true;
+                Debug.WriteLine("[IOKit] Connected via USB Bulk Transfer");
+                ConnectionStateChanged?.Invoke(this, true);
+
+                try
+                {
+                    await InitializeDeviceAsync();
+                }
+                catch (Exception e)
+                {
+                    Debug.WriteLine($"[IOKit] Device initialization error: {e.Message}");
+                }
+                return;
+            }
+
+            Debug.WriteLine("[IOKit] Connection timed out, falling back to serial port...");
+            _ioKitTransport.DataReceived -= IOKit_DataReceived;
+            _ioKitTransport.ConnectionChanged -= IOKit_ConnectionChanged;
+            _ioKitTransport.StopMonitoring();
+            _ioKitTransport.Dispose();
+            _ioKitTransport = null;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[IOKit] Failed: {ex.Message}, falling back to serial port...");
+            if (_ioKitTransport != null)
+            {
+                _ioKitTransport.DataReceived -= IOKit_DataReceived;
+                _ioKitTransport.ConnectionChanged -= IOKit_ConnectionChanged;
+                _ioKitTransport.Dispose();
+                _ioKitTransport = null;
+            }
+        }
+#endif
+
         _serialPort = new SerialPort(PortName, 460800, Parity.None, 8, StopBits.One);
         _serialPort.ReadTimeout = 4000;
         _serialPort.WriteTimeout = 4000;
@@ -115,46 +180,7 @@ public class BusyTagDevice(string? portName)
                 return;
             }
 
-            await GetDeviceNameAsync();
-            CachedFileDirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "BusyTagImages");
-            if (!Directory.Exists(CachedFileDirPath)) Directory.CreateDirectory(CachedFileDirPath);
-            
-            await GetManufactureNameAsync();
-            await GetDeviceIdAsync();
-            await GetFirmwareVersionAsync();
-            await GetHardwareVersionAsync();
-            await GetCurrentImageNameAsync();
-            await GetSolidColorAsync();
-            await GetDisplayBrightnessAsync();
-
-            if (FirmwareVersionFloat < 2.0)
-            {
-                await SetUsbMassStorageActiveAsync(true);
-                _busyTagDrive = FindBusyTagDrive();
-            }
-            if (FirmwareVersionFloat > 0.7)
-                await SetAllowedAutoStorageScanAsync(false);
-            
-            await GetTotalStorageSizeAsync();
-            await GetFreeStorageSizeAsync();
-            await GetFileListAsync();
-
-            // Validate storage integrity shortly after connection (non-blocking)
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(1000); // Wait 1 second after connection
-                await ValidateStorageIntegrityAsync();
-            });
-
-            // Only sync the current image immediately for faster connection
-            // if (!string.IsNullOrEmpty(CurrentImageName) && !FileExistsInCache(CurrentImageName))
-            // {
-            //     await GetFileAsync(CurrentImageName);
-            // }
-
-            ReceivedDeviceBasicInformation?.Invoke(this, true);
-            ConnectionTask(3000, _ctsForConnection.Token);
+            await InitializeDeviceAsync();
         }
         catch (Exception e)
         {
@@ -163,19 +189,73 @@ public class BusyTagDevice(string? portName)
         }
     }
 
+    /// <summary>
+    /// Shared device initialization sequence used by both IOKit and serial port connection paths.
+    /// Queries device info, file list, storage, and starts connection monitoring.
+    /// </summary>
+    private async Task InitializeDeviceAsync()
+    {
+        await GetDeviceNameAsync();
+        CachedFileDirPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "BusyTagImages");
+        if (!Directory.Exists(CachedFileDirPath)) Directory.CreateDirectory(CachedFileDirPath);
+
+        await GetManufactureNameAsync();
+        await GetDeviceIdAsync();
+        await GetFirmwareVersionAsync();
+        await GetHardwareVersionAsync();
+        await GetCurrentImageNameAsync();
+        await GetSolidColorAsync();
+        await GetDisplayBrightnessAsync();
+
+        if (FirmwareVersionFloat < 2.0)
+        {
+            await SetUsbMassStorageActiveAsync(true);
+            _busyTagDrive = FindBusyTagDrive();
+        }
+        if (FirmwareVersionFloat > 0.7)
+            await SetAllowedAutoStorageScanAsync(false);
+
+        await GetTotalStorageSizeAsync();
+        await GetFreeStorageSizeAsync();
+        await GetFileListAsync();
+
+        // Validate storage integrity shortly after connection (non-blocking)
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(1000); // Wait 1 second after connection
+            await ValidateStorageIntegrityAsync();
+        });
+
+        ReceivedDeviceBasicInformation?.Invoke(this, true);
+        ConnectionTask(3000, _ctsForConnection.Token);
+    }
+
     public void Disconnect()
     {
         try
         {
-            _serialPort?.Close();
-            _serialPort?.Dispose();
+#if MACCATALYST
+            if (_useIOKit)
+            {
+                _ioKitTransport?.StopMonitoring();
+                _ioKitTransport?.Dispose();
+                _ioKitTransport = null;
+                _useIOKit = false;
+            }
+            else
+#endif
+            {
+                _serialPort?.Close();
+                _serialPort?.Dispose();
+                _serialPort = null;
+            }
             ClearBuffer(); // Clean up the centralized buffer
         }
         finally
         {
             ConnectionStateChanged?.Invoke(this, false);
             _ctsForConnection.Cancel();
-            _serialPort = null;
         }
     }
 
@@ -195,7 +275,12 @@ public class BusyTagDevice(string? portName)
         lock (_lockObject)
         {
             Debug.WriteLine($"Sending raw data count: {count}");
-            _serialPort?.Write(data, offset, count);
+#if MACCATALYST
+            if (_useIOKit)
+                _ioKitTransport?.Send(data, offset, count);
+            else
+#endif
+                _serialPort?.Write(data, offset, count);
         }
     }
 
@@ -222,7 +307,16 @@ public class BusyTagDevice(string? portName)
                 {
                     // Clear buffer instead of discarding serial port buffer
                     if (discardInBuffer) ClearBuffer();
-                    if (!string.IsNullOrEmpty(command)) _serialPort?.WriteLine(command);
+#if MACCATALYST
+                    if (_useIOKit)
+                    {
+                        if (!string.IsNullOrEmpty(command)) _ioKitTransport?.SendLine(command);
+                    }
+                    else
+#endif
+                    {
+                        if (!string.IsNullOrEmpty(command)) _serialPort?.WriteLine(command);
+                    }
 
                     timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                     Debug.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]TX:{command}");
@@ -235,7 +329,8 @@ public class BusyTagDevice(string? portName)
                 }
             }
 
-            // Read response from buffer (outside lock to allow sp_DataReceived to run)
+            // Read response from buffer — use ConfigureAwait(false) to avoid blocking
+            // the main thread, which IOKit needs for device monitoring callbacks
             var response = new StringBuilder();
             var startTime = DateTime.Now;
 
@@ -244,7 +339,7 @@ public class BusyTagDevice(string? portName)
                 if (GetBufferCount() > 0)
                 {
                     Debug.WriteLine($"Buffer has {GetBufferCount()} bytes");
-                    var data = await ReadStringFromBufferAsync(50);
+                    var data = await ReadStringFromBufferAsync(50).ConfigureAwait(false);
                     response.Append(data);
 
                     var responseStr = response.ToString();
@@ -260,7 +355,7 @@ public class BusyTagDevice(string? portName)
                     if (waitForFirstResponse) break;
                 }
 
-                await Task.Delay(1);
+                await Task.Delay(1).ConfigureAwait(false);
             }
 
             result = response.ToString().Trim();
@@ -300,7 +395,16 @@ public class BusyTagDevice(string? portName)
                             if (discardInBuffer) ClearBuffer();
                         }
 
-                        if (data != null) _serialPort?.Write(data, 0, data.Length);
+#if MACCATALYST
+                        if (_useIOKit)
+                        {
+                            if (data != null) _ioKitTransport?.Send(data, 0, data.Length);
+                        }
+                        else
+#endif
+                        {
+                            if (data != null) _serialPort?.Write(data, 0, data.Length);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -392,6 +496,53 @@ public class BusyTagDevice(string? portName)
     {
         Debug.WriteLine(e.ToString());
     }
+
+#if MACCATALYST
+    /// <summary>
+    /// Callback for data received from IOKit USB Bulk IN transfer.
+    /// Mirrors sp_DataReceived: enqueues bytes into the centralized buffer.
+    /// </summary>
+    private void IOKit_DataReceived(byte[] data)
+    {
+        try
+        {
+            long timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            Debug.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]IOKit_DataReceived {data.Length} bytes");
+
+            for (int i = 0; i < data.Length; i++)
+            {
+                _dataBuffer.Enqueue(data[i]);
+            }
+
+            // Signal that data is available
+            _dataAvailableSemaphore.Release(data.Length);
+
+            var text = Encoding.UTF8.GetString(data);
+            // If not in command mode, filter and process async events
+            if (!_asyncCommandActive || text.StartsWith("+evn:"))
+            {
+                FilterResponse(text);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[ERROR] IOKit_DataReceived: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Callback for IOKit USB connection state changes.
+    /// Triggers disconnect cleanup when the device is removed.
+    /// </summary>
+    private void IOKit_ConnectionChanged(bool connected)
+    {
+        if (!connected && _useIOKit)
+        {
+            Debug.WriteLine("[IOKit] Device disconnected");
+            Disconnect();
+        }
+    }
+#endif
 
     /// <summary>
     /// Read data from the centralized buffer (populated by sp_DataReceived).
