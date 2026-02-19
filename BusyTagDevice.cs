@@ -856,8 +856,12 @@ public class BusyTagDevice(string? portName)
         {
             // ReSharper disable once StringLiteralTypo
             var response = await SendCommandAsync("AT+GFSS",200);
-            var size = response.Contains("+FSS:") ? response.Split(':').Last() : "0";
-            FreeStorageSize = long.Parse(size);
+            // Only update if we got a valid response (prevents overwriting with 0 on concurrent command conflicts)
+            if (response.Contains("+FSS:"))
+            {
+                var size = response.Split(':').Last();
+                FreeStorageSize = long.Parse(size);
+            }
         }
         else
         {
@@ -873,8 +877,12 @@ public class BusyTagDevice(string? portName)
         {
             // ReSharper disable once StringLiteralTypo
             var response = await SendCommandAsync("AT+GTSS");
-            var size = response.Contains("+TSS:") ? response.Split(':').Last() : "0";
-            TotalStorageSize = long.Parse(size);
+            // Only update if we got a valid response (prevents overwriting with 0 on concurrent command conflicts)
+            if (response.Contains("+TSS:"))
+            {
+                var size = response.Split(':').Last();
+                TotalStorageSize = long.Parse(size);
+            }
         }
         else
         {
@@ -1075,7 +1083,7 @@ public class BusyTagDevice(string? portName)
     public async Task<bool> ActivateFileStorageScanAsync()
     {
         // ReSharper disable once StringLiteralTypo
-        var response = await SendCommandAsync("AT+AFSS");
+        var response = await SendCommandAsync("AT+AFSS", 200);
         return response.Contains("OK");
     }
 
