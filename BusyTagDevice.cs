@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Linq;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Ports;
@@ -27,6 +28,7 @@ public class BusyTagDevice(string? portName)
     public event EventHandler<float>? FirmwareUpdateStatus;
     public event EventHandler<bool>? PlayPatternStatus;
     public event EventHandler<bool>? WritingInStorage;
+    public event EventHandler<string>? FirmwareUpdateError;
     private SerialPort? _serialPort;
     private readonly object _lockObject = new object();
     private DeviceConfig _deviceConfig = new();
@@ -749,7 +751,15 @@ public class BusyTagDevice(string? portName)
                     //     // ReceivedShowingPicture?.Invoke(this, CurrentImageName);
                     // }
                     // else 
-                    if (parts[0].Equals("+evn"))
+                    if (parts[0].Equals("+log"))
+                    {
+                        var logMessage = string.Join(":", parts.Skip(1)).Trim();
+                        if (logMessage.Contains("Same version as current"))
+                        {
+                            FirmwareUpdateError?.Invoke(this, logMessage);
+                        }
+                    }
+                    else if (parts[0].Equals("+evn"))
                     {
                         var args = parts[1].Split(',');
                         if (args.Length >= 2)
