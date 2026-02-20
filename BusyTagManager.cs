@@ -520,7 +520,7 @@ public class BusyTagManager : IDisposable
             {
                 try
                 {
-                    using var testPort = new SerialPort(port, 460800);
+                    using var testPort = new SerialPort(port, 1500000);
                     testPort.ReadTimeout = 2000;
                     testPort.WriteTimeout = 2000;
 
@@ -578,7 +578,7 @@ public class BusyTagManager : IDisposable
             {
                 try
                 {
-                    using var testPort = new SerialPort(port, 460800);
+                    using var testPort = new SerialPort(port, 1500000);
                     testPort.ReadTimeout = 2000;
                     testPort.WriteTimeout = 2000;
 

@@ -8,7 +8,7 @@ namespace BusyTag.Lib.Platforms.MacCatalyst;
 /// <summary>
 /// IOKit USB Bulk Transfer transport for macOS. Bypasses the serial port driver
 /// and communicates directly with the BusyTag device via USB bulk endpoints,
-/// achieving native USB speed instead of 460800 baud serial (~46 KB/s).
+/// achieving native USB speed instead of serial port driver limitations.
 /// </summary>
 public class IOKitUsbTransport : IDisposable
 {

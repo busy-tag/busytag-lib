@@ -160,7 +160,7 @@ public class BusyTagDevice(string? portName)
         }
 #endif
 
-        _serialPort = new SerialPort(PortName, 460800, Parity.None, 8, StopBits.One);
+        _serialPort = new SerialPort(PortName, 1500000, Parity.None, 8, StopBits.One);
         _serialPort.ReadTimeout = 4000;
         _serialPort.WriteTimeout = 4000;
         _serialPort.DtrEnable = false;
@@ -345,7 +345,7 @@ public class BusyTagDevice(string? portName)
                 var remainingTimeout = timeoutMs - (int)(DateTime.Now - startTime).TotalMilliseconds;
                 if (remainingTimeout <= 0) break;
 
-                var dataAvailable = await _dataAvailableSemaphore.WaitAsync(Math.Min(remainingTimeout, 20));
+                var dataAvailable = await _dataAvailableSemaphore.WaitAsync(remainingTimeout);
 
                 if (dataAvailable || GetBufferCount() > 0)
                 {
@@ -575,17 +575,13 @@ public class BusyTagDevice(string? portName)
             var remainingTimeout = timeoutMs - (int)(DateTime.Now - startTime).TotalMilliseconds;
             if (remainingTimeout <= 0) break;
 
-            var dataAvailable = await _dataAvailableSemaphore.WaitAsync(Math.Min(remainingTimeout, 10));
+            var dataAvailable = await _dataAvailableSemaphore.WaitAsync(remainingTimeout);
 
             if (dataAvailable && _dataBuffer.TryDequeue(out byte b))
             {
                 result.Add(b);
             }
-            else if (!dataAvailable)
-            {
-                // Small delay if no data available yet
-                await Task.Delay(1);
-            }
+            // No extra delay needed - semaphore wait already handles timing
         }
 
         return result.ToArray();
@@ -1402,8 +1398,10 @@ public class BusyTagDevice(string? portName)
             }
 
             var data = await File.ReadAllBytesAsync(sourcePath);
-            const int chunkSize = 1024 * 8;
+            const int chunkSize = 1024 * 32; // Increased from 8KB to 32KB for better throughput
             var totalBytesTransferred = 0f;
+            var lastProgressUpdate = DateTime.Now;
+            const int progressUpdateIntervalMs = 100; // Throttle progress updates to every 100ms
 
             var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 1000);
             if (!response.Contains(">"))
@@ -1426,7 +1424,8 @@ public class BusyTagDevice(string? portName)
 
                 var remainingBytes = data.Length - i;
                 var currentChunkSize = Math.Min(chunkSize, remainingBytes);
-                var chunkData = data.Skip(i).Take(currentChunkSize).ToArray();
+                // Use array slice instead of LINQ to avoid allocation per chunk
+                var chunkData = new ArraySegment<byte>(data, i, currentChunkSize);
 
                 // Verify connection before each chunk
                 if (!IsConnected)
@@ -1439,13 +1438,18 @@ public class BusyTagDevice(string? portName)
 
                 try
                 {
-                    SendRawData(chunkData, 0, chunkData.Length);
-                    totalBytesTransferred += chunkData.Length;
+                    SendRawData(chunkData.Array!, chunkData.Offset, chunkData.Count);
+                    totalBytesTransferred += chunkData.Count;
 
-                    // Calculate progress more precisely
-                    var progressLevel = (float)((double)totalBytesTransferred / data.Length * 100.0);
-                    args.ProgressLevel = progressLevel;
-                    FileUploadProgress?.Invoke(this, args);
+                    // Throttle progress updates to reduce UI overhead
+                    var now = DateTime.Now;
+                    if ((now - lastProgressUpdate).TotalMilliseconds >= progressUpdateIntervalMs)
+                    {
+                        var progressLevel = (float)((double)totalBytesTransferred / data.Length * 100.0);
+                        args.ProgressLevel = progressLevel;
+                        FileUploadProgress?.Invoke(this, args);
+                        lastProgressUpdate = now;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1686,7 +1690,8 @@ public class BusyTagDevice(string? portName)
             }
 
             // Continue reading remaining data
-            var downloadTimeout = Math.Max(30, fileSize / 1024 + 15);
+            // Timeout based on ~50 KB/s minimum expected speed with 50% buffer
+            var downloadTimeout = Math.Max(30, (int)(fileSize / 50000.0 * 1.5) + 10);
             var downloadStartTime = DateTime.Now;
             var zeroSizeResponseCounter = 0;
             const int maxZeroSizeResponses = 10;
