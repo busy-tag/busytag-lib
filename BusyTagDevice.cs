@@ -14,6 +14,7 @@ namespace BusyTag.Lib;
 public class BusyTagDevice(string? portName)
 {
     private const int MaxFilenameLength = 50; // TODO: Need to recheck this
+    private const long MaxCacheSizeBytes = 100 * 1024 * 1024; // 100 MB max cache size
     public event EventHandler<bool>? ConnectionStateChanged;
     public event EventHandler<bool>? ReceivedDeviceBasicInformation;
     public event EventHandler<LedArgs>? ReceivedSolidColor;
@@ -1088,8 +1089,27 @@ public class BusyTagDevice(string? portName)
 
     public async Task<bool> ActivateFileStorageScanAsync()
     {
+        // Wait for device to finish writing to storage (WIS,0) before sending AFSS
+        var timeout = DateTime.Now.AddSeconds(30);
+        while (_isWritingToStorage && DateTime.Now < timeout)
+        {
+            await Task.Delay(100);
+        }
+
+        if (_isWritingToStorage)
+        {
+            Debug.WriteLine("Timeout waiting for device to finish writing to storage");
+            return false;
+        }
+
         // ReSharper disable once StringLiteralTypo
         var response = await SendCommandAsync("AT+AFSS", 200);
+        return response.Contains("OK");
+    }
+
+    public async Task<bool> SetStorageAutoDeleteAsync(bool enabled)
+    {
+        var response = await SendCommandAsync($"AT+SAD={(enabled ? 1 : 0)}", 200);
         return response.Contains("OK");
     }
 
@@ -1254,6 +1274,7 @@ public class BusyTagDevice(string? portName)
         var destFilePath = Path.Combine(CachedFileDirPath, fileName);
         // if (!FileExistsInCache(fileName))
             File.Copy(sourcePath, destFilePath, true);
+        CleanupCacheIfNeeded();
         _sendingFile = true;
         _currentUploadFileName = fileName;
 
@@ -1392,9 +1413,15 @@ public class BusyTagDevice(string? portName)
             var isFreeSpaceAvailable = await FreeUpStorage(fileSize);
             if (!isFreeSpaceAvailable)
             {
-                CancelFileUpload(false, UploadErrorType.InsufficientStorage, 
+                CancelFileUpload(false, UploadErrorType.InsufficientStorage,
                     "Insufficient storage space on device");
                 return false;
+            }
+
+            // For firmware files, enable storage auto-delete before upload
+            if (fileName.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
+            {
+                await SetStorageAutoDeleteAsync(true);
             }
 
             var data = await File.ReadAllBytesAsync(sourcePath);
@@ -1461,11 +1488,25 @@ public class BusyTagDevice(string? portName)
             }
             _writeRawData = false;
 
+            // Force USB CDC driver to flush by writing a newline
+            // The USB driver may hold small final chunks until more data arrives
+            // This write triggers the driver to send any buffered data
+            if (_serialPort != null)
+            {
+                _serialPort.BaseStream.Flush();
+                // Wait for output buffer to drain
+                var drainStart = DateTime.Now;
+                while (_serialPort.BytesToWrite > 0 && (DateTime.Now - drainStart).TotalMilliseconds < 5000)
+                {
+                    await Task.Delay(10);
+                }
+            }
+
             // Final progress update
             args.ProgressLevel = 100.0f;
             FileUploadProgress?.Invoke(this, args);
-            
-            response = await SendCommandAsync("", 1500, discardInBuffer: false);
+
+            response = await SendCommandAsync("\r\n", 5000, discardInBuffer: false);
             if (response.Contains("OK"))
             {
                 return true; // Success - CancelFileUpload will be called with success=true
@@ -1740,6 +1781,7 @@ public class BusyTagDevice(string? portName)
             {
                 Debug.WriteLine($"Serial download completed: {fileName}");
                 await File.WriteAllBytesAsync(destFilePath, fileData.Take((int)fileSize).ToArray());
+                CleanupCacheIfNeeded();
                 return destFilePath;
             }
 
@@ -1751,6 +1793,7 @@ public class BusyTagDevice(string? portName)
         if (_busyTagDrive == null) return "";
         var sourceFilePath = Path.Combine(_busyTagDrive.Name, fileName);
         File.Copy(sourceFilePath, destFilePath);
+        CleanupCacheIfNeeded();
         return destFilePath;
     }
 
@@ -1771,6 +1814,55 @@ public class BusyTagDevice(string? portName)
         }
 
         return "";
+    }
+
+    /// <summary>
+    /// Cleans up the cache directory if it exceeds the maximum size.
+    /// Deletes oldest files first until the cache is under the limit.
+    /// </summary>
+    private void CleanupCacheIfNeeded()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(CachedFileDirPath) || !Directory.Exists(CachedFileDirPath))
+                return;
+
+            var directoryInfo = new DirectoryInfo(CachedFileDirPath);
+            var files = directoryInfo.GetFiles()
+                .OrderBy(f => f.LastAccessTimeUtc) // Oldest accessed first
+                .ToList();
+
+            var totalSize = files.Sum(f => f.Length);
+
+            if (totalSize <= MaxCacheSizeBytes)
+                return;
+
+            Debug.WriteLine($"[Cache] Cache size {totalSize / (1024 * 1024)} MB exceeds limit of {MaxCacheSizeBytes / (1024 * 1024)} MB, cleaning up...");
+
+            foreach (var file in files)
+            {
+                if (totalSize <= MaxCacheSizeBytes)
+                    break;
+
+                try
+                {
+                    var fileSize = file.Length;
+                    file.Delete();
+                    totalSize -= fileSize;
+                    Debug.WriteLine($"[Cache] Deleted {file.Name} ({fileSize / 1024} KB), remaining: {totalSize / (1024 * 1024)} MB");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Cache] Failed to delete {file.Name}: {ex.Message}");
+                }
+            }
+
+            Debug.WriteLine($"[Cache] Cleanup complete, cache size now: {totalSize / (1024 * 1024)} MB");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Cache] Cleanup failed: {ex.Message}");
+        }
     }
 
     public string GetFullFilePath(string fileName)

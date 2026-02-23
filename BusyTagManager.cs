@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.IO.Ports;
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 #if WINDOWS || WINDOWS10_0_19041_0_OR_GREATER
@@ -214,11 +215,11 @@ public class BusyTagManager : IDisposable
     {
         var deviceId = $"VID_{vid}&PID_{pid}";
         var foundDevices = new List<string>();
-        
+
         try
         {
 #if WINDOWS || WINDOWS10_0_19041_0_OR_GREATER
-            // Query WMI for USB devices
+            // Query WMI for USB devices using direct reference
             const string query = "SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%USB%'";
 
             using (var searcher = new ManagementObjectSearcher(query))
@@ -245,12 +246,8 @@ public class BusyTagManager : IDisposable
                 }
             }
 #else
-            // If System.Management is not available, fall back to AT command testing
-            if (EnableVerboseLogging)
-                Debug.WriteLine("[DEBUG] System.Management not available, falling back to AT command testing");
-
-            // For non-Windows platforms, return empty list as this functionality is not supported
-            return foundDevices;
+            // Use runtime reflection to access System.Management when not available at compile-time
+            foundDevices = FindPortByVidPidWindowsViaReflection(deviceId);
 #endif
 
             lock (_lockObject)
@@ -269,8 +266,142 @@ public class BusyTagManager : IDisposable
                 Debug.WriteLine($"[DEBUG] Windows WMI query failed: {ex.Message}");
             _isScanningForDevices = false;
         }
-        
+
         return null;
+    }
+
+    /// <summary>
+    /// Uses reflection to access System.Management for WMI queries at runtime.
+    /// This allows the library to work on Windows even when compiled without Windows-specific TFM.
+    /// </summary>
+    private List<string> FindPortByVidPidWindowsViaReflection(string deviceId)
+    {
+        var foundDevices = new List<string>();
+
+        try
+        {
+            // Try to load System.Management assembly at runtime
+            var assembly = Assembly.Load("System.Management");
+            if (assembly == null)
+            {
+                if (EnableVerboseLogging)
+                    Debug.WriteLine("[DEBUG] System.Management assembly not found at runtime");
+                return foundDevices;
+            }
+
+            // Get the ManagementObjectSearcher type
+            var searcherType = assembly.GetType("System.Management.ManagementObjectSearcher");
+            if (searcherType == null)
+            {
+                if (EnableVerboseLogging)
+                    Debug.WriteLine("[DEBUG] ManagementObjectSearcher type not found");
+                return foundDevices;
+            }
+
+            // Create instance with query
+            const string query = "SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%USB%'";
+            var searcher = Activator.CreateInstance(searcherType, query);
+            if (searcher == null)
+            {
+                if (EnableVerboseLogging)
+                    Debug.WriteLine("[DEBUG] Failed to create ManagementObjectSearcher instance");
+                return foundDevices;
+            }
+
+            try
+            {
+                // Call Get() method
+                var getMethod = searcherType.GetMethod("Get", Type.EmptyTypes);
+                if (getMethod == null)
+                {
+                    if (EnableVerboseLogging)
+                        Debug.WriteLine("[DEBUG] Get method not found on ManagementObjectSearcher");
+                    return foundDevices;
+                }
+
+                var collection = getMethod.Invoke(searcher, null);
+                if (collection == null)
+                {
+                    if (EnableVerboseLogging)
+                        Debug.WriteLine("[DEBUG] WMI query returned null");
+                    return foundDevices;
+                }
+
+                // Iterate through the collection
+                foreach (var device in (System.Collections.IEnumerable)collection)
+                {
+                    try
+                    {
+                        // ManagementObject uses indexer with string parameter - access via GetValue method
+                        var deviceType = device.GetType();
+
+                        // Try to get the indexer (Item property with string parameter)
+                        var indexerProperty = deviceType.GetProperty("Item", new[] { typeof(string) });
+
+                        string? deviceIdValue = null;
+                        string? nameValue = null;
+
+                        if (indexerProperty != null)
+                        {
+                            deviceIdValue = indexerProperty.GetValue(device, new object[] { "DeviceID" })?.ToString();
+                            nameValue = indexerProperty.GetValue(device, new object[] { "Name" })?.ToString();
+                        }
+                        else
+                        {
+                            // Fallback: try accessing via GetPropertyValue method
+                            var getPropertyValueMethod = deviceType.GetMethod("GetPropertyValue", new[] { typeof(string) });
+                            if (getPropertyValueMethod != null)
+                            {
+                                deviceIdValue = getPropertyValueMethod.Invoke(device, new object[] { "DeviceID" })?.ToString();
+                                nameValue = getPropertyValueMethod.Invoke(device, new object[] { "Name" })?.ToString();
+                            }
+                        }
+
+                        if (deviceIdValue != null && deviceIdValue.Contains(deviceId))
+                        {
+                            if (nameValue != null && nameValue.Contains("COM"))
+                            {
+                                // Extract COM port number
+                                var match = System.Text.RegularExpressions.Regex.Match(nameValue, @"COM(\d+)");
+                                if (match.Success)
+                                {
+                                    var port = $"COM{match.Groups[1].Value}";
+                                    foundDevices.Add(port);
+                                    if (EnableVerboseLogging)
+                                        Debug.WriteLine($"[DEBUG] Found device via WMI reflection: {port}");
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        // Dispose the ManagementObject
+                        if (device is IDisposable disposableDevice)
+                        {
+                            disposableDevice.Dispose();
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                // Dispose the searcher
+                if (searcher is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
+
+            if (EnableVerboseLogging)
+                Debug.WriteLine($"[DEBUG] WMI reflection found {foundDevices.Count} device(s)");
+        }
+        catch (Exception ex)
+        {
+            if (EnableVerboseLogging)
+                Debug.WriteLine($"[DEBUG] WMI reflection failed: {ex.Message}");
+        }
+
+        return foundDevices;
     }
 
     #endregion
