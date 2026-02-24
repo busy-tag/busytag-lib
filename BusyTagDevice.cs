@@ -1030,14 +1030,14 @@ public class BusyTagDevice(string? portName)
             var needsFormat = false;
             var reason = string.Empty;
 
-            // Check 0: Total storage size is 0 (disk not readable/corrupted)
-            if (TotalStorageSize <= 0)
-            {
-                needsFormat = true;
-                reason = "Total storage size is 0KB - disk not readable or corrupted";
-            }
+            // // Check 0: Total storage size is 0 (disk not readable/corrupted)
+            // if (TotalStorageSize <= 0)
+            // {
+            //     needsFormat = true;
+            //     reason = "Total storage size is 0KB - disk not readable or corrupted";
+            // }
             // Check 1: Files exist, but used space is zero (or vice versa)
-            else if (fileCount > 0 && usedStorageSize <= 0)
+            if (fileCount > 0 && usedStorageSize <= 0)
             {
                 needsFormat = true;
                 reason = $"Files exist ({fileCount}) but used space is zero";
