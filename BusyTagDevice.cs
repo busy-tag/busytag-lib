@@ -215,6 +215,7 @@ public class BusyTagDevice(string? portName)
         {
             await SetUsbMassStorageActiveAsync(true);
             _busyTagDrive = FindBusyTagDrive();
+            await SetShowAfterDropAsync(false);
         }
         if (FirmwareVersionFloat > 0.7)
             await SetAllowedAutoStorageScanAsync(false);
@@ -1107,7 +1108,7 @@ public class BusyTagDevice(string? portName)
         return response.Contains("OK");
     }
 
-    public async Task<bool> SetStorageAutoDeleteAsync(bool enabled)
+    public async Task<bool> SetShowAfterDropAsync(bool enabled)
     {
         var response = await SendCommandAsync($"AT+SAD={(enabled ? 1 : 0)}", 200);
         return response.Contains("OK");
@@ -1421,7 +1422,7 @@ public class BusyTagDevice(string? portName)
             // For firmware files, enable storage auto-delete before upload
             if (fileName.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
             {
-                await SetStorageAutoDeleteAsync(true);
+                await SetShowAfterDropAsync(true);
             }
 
             var data = await File.ReadAllBytesAsync(sourcePath);
