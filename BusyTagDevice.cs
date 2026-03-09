@@ -215,6 +215,7 @@ public class BusyTagDevice(string? portName)
         {
             await SetUsbMassStorageActiveAsync(true);
             _busyTagDrive = FindBusyTagDrive();
+            await SetShowAfterDropAsync(false);
         }
         if (FirmwareVersionFloat > 0.7)
             await SetAllowedAutoStorageScanAsync(false);
@@ -866,8 +867,14 @@ public class BusyTagDevice(string? portName)
             // Only update if we got a valid response (prevents overwriting with 0 on concurrent command conflicts)
             if (response.Contains("+FSS:"))
             {
-                var size = response.Split(':').Last();
-                FreeStorageSize = long.Parse(size);
+                // Extract value directly after +FSS: prefix to avoid parsing ERROR:X suffixes
+                var fssIndex = response.IndexOf("+FSS:", StringComparison.Ordinal);
+                var valueStart = fssIndex + 5;
+                var valueEnd = valueStart;
+                while (valueEnd < response.Length && char.IsDigit(response[valueEnd]))
+                    valueEnd++;
+                if (valueEnd > valueStart && long.TryParse(response[valueStart..valueEnd], out var parsed))
+                    FreeStorageSize = parsed;
             }
         }
         else
@@ -1107,7 +1114,7 @@ public class BusyTagDevice(string? portName)
         return response.Contains("OK");
     }
 
-    public async Task<bool> SetStorageAutoDeleteAsync(bool enabled)
+    public async Task<bool> SetShowAfterDropAsync(bool enabled)
     {
         var response = await SendCommandAsync($"AT+SAD={(enabled ? 1 : 0)}", 200);
         return response.Contains("OK");
@@ -1409,6 +1416,14 @@ public class BusyTagDevice(string? portName)
 
        try
         {
+            // Wait for any active serial command (e.g. LED color) to complete
+            // before sending file upload commands to avoid command collisions
+            var waitStart = DateTime.Now;
+            while (_asyncCommandActive && (DateTime.Now - waitStart).TotalMilliseconds < 2000)
+            {
+                await Task.Delay(50);
+            }
+
             var fileSize = new FileInfo(sourcePath).Length;
             var isFreeSpaceAvailable = await FreeUpStorage(fileSize);
             if (!isFreeSpaceAvailable)
@@ -1421,7 +1436,7 @@ public class BusyTagDevice(string? portName)
             // For firmware files, enable storage auto-delete before upload
             if (fileName.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
             {
-                await SetStorageAutoDeleteAsync(true);
+                await SetShowAfterDropAsync(true);
             }
 
             var data = await File.ReadAllBytesAsync(sourcePath);
@@ -1506,7 +1521,7 @@ public class BusyTagDevice(string? portName)
             args.ProgressLevel = 100.0f;
             FileUploadProgress?.Invoke(this, args);
 
-            response = await SendCommandAsync("\r\n", 5000, discardInBuffer: false);
+            response = await SendCommandAsync("\r\n", 1500, discardInBuffer: false);
             if (response.Contains("OK"))
             {
                 return true; // Success - CancelFileUpload will be called with success=true
@@ -1619,8 +1634,9 @@ public class BusyTagDevice(string? portName)
             var response = await SendCommandAsync($"AT+DF={fileName}", 300);
             if (!response.Contains("OK"))
             {
-                Debug.WriteLine($"Error deleting file: {fileName}");            
-            };
+                Debug.WriteLine($"Error deleting file: {fileName}");
+                return false;
+            }
             await GetFreeStorageSizeAsync();
         }
         else
