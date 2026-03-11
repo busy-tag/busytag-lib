@@ -66,11 +66,11 @@
 
     <!-- Dependencies -->
     <ItemGroup>
-        <PackageReference Include="System.IO.Ports" Version="9.0.13" />
-        <PackageReference Include="System.Text.Json" Version="9.0.13" />
+        <PackageReference Include="System.IO.Ports" Version="9.0.14" />
+        <PackageReference Include="System.Text.Json" Version="9.0.14" />
         <PackageReference Include="SocketIOClient" Version="3.1.2" />
         <!-- Only include System.Management for .NET standard and Windows targets -->
-        <PackageReference Include="System.Management" Version="9.0.13" Condition="$(TargetFramework.Contains('windows'))" />
+        <PackageReference Include="System.Management" Version="9.0.14" Condition="$(TargetFramework.Contains('windows'))" />
     </ItemGroup>
 
     <!-- Platform-specific build conditions -->
