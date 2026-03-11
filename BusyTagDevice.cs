@@ -217,7 +217,7 @@ public class BusyTagDevice(string? portName)
             _busyTagDrive = FindBusyTagDrive();
             await SetShowAfterDropAsync(false);
         }
-        if (FirmwareVersionFloat > 0.7)
+        if (FirmwareVersionFloat > 0.7 && FirmwareVersionFloat < 2.0)
             await SetAllowedAutoStorageScanAsync(false);
 
         await GetTotalStorageSizeAsync();
@@ -278,7 +278,7 @@ public class BusyTagDevice(string? portName)
 
         lock (_lockObject)
         {
-            Debug.WriteLine($"Sending raw data count: {count}");
+            Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Sending raw data count: {count}");
 #if MACCATALYST
             if (_useIOKit)
                 _ioKitTransport?.Send(data, offset, count);
@@ -386,6 +386,45 @@ public class BusyTagDevice(string? portName)
         {
             _asyncCommandActive = false;
         }
+    }
+
+    private async Task<string> WaitForResponseAsync(int timeoutMs = 1500)
+    {
+        var response = new StringBuilder();
+        var startTime = DateTime.Now;
+
+        while ((DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
+        {
+            var remainingTimeout = timeoutMs - (int)(DateTime.Now - startTime).TotalMilliseconds;
+            if (remainingTimeout <= 0) break;
+
+            var dataAvailable = await _dataAvailableSemaphore.WaitAsync(remainingTimeout);
+
+            if (dataAvailable || GetBufferCount() > 0)
+            {
+                var data = await ReadStringFromBufferAsync(50).ConfigureAwait(false);
+                response.Append(data);
+                while (_dataBuffer.TryDequeue(out byte b))
+                {
+                    response.Append((char)b);
+                }
+
+                var responseStr = response.ToString();
+                if (responseStr.Contains("OK\r\n") || responseStr.Contains("ERROR:"))
+                {
+                    var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+                    Debug.WriteLine($"[{UnixToDate(timestamp, "HH:mm:ss.fff")}]RX:{responseStr.Trim()}");
+                    return responseStr.Trim();
+                }
+            }
+
+            await Task.Delay(1).ConfigureAwait(false);
+        }
+
+        var result = response.ToString().Trim();
+        var ts = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        Debug.WriteLine($"[{UnixToDate(ts, "HH:mm:ss.fff")}]RX:{result}");
+        return result;
     }
 
     public async Task<byte[]> SendBytesAsync(byte[]? data, int timeoutMs = 3000, bool discardInBuffer = true)
@@ -1434,7 +1473,8 @@ public class BusyTagDevice(string? portName)
             }
 
             // For firmware files, enable storage auto-delete before upload
-            if (fileName.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
+            // AT+SAD is not supported on firmware >= 2.0
+            if (fileName.EndsWith(".bin", StringComparison.OrdinalIgnoreCase) && FirmwareVersionFloat < 2.0)
             {
                 await SetShowAfterDropAsync(true);
             }
@@ -1445,7 +1485,8 @@ public class BusyTagDevice(string? portName)
             var lastProgressUpdate = DateTime.Now;
             const int progressUpdateIntervalMs = 100; // Throttle progress updates to every 100ms
 
-            var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 1000);
+            // Longer timeout to allow device storage cleanup before upload
+            var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 2000);
             if (!response.Contains(">"))
             {
                 CancelFileUpload(false, UploadErrorType.DeviceError, 
@@ -1503,13 +1544,15 @@ public class BusyTagDevice(string? portName)
             }
             _writeRawData = false;
 
-            // Force USB CDC driver to flush by writing a newline
-            // The USB driver may hold small final chunks until more data arrives
-            // This write triggers the driver to send any buffered data
+            // Flush .NET stream buffer
+#if MACCATALYST
+            if (_useIOKit)
+                _ioKitTransport?.Flush();
+            else
+#endif
             if (_serialPort != null)
             {
                 _serialPort.BaseStream.Flush();
-                // Wait for output buffer to drain
                 var drainStart = DateTime.Now;
                 while (_serialPort.BytesToWrite > 0 && (DateTime.Now - drainStart).TotalMilliseconds < 5000)
                 {
@@ -1521,14 +1564,32 @@ public class BusyTagDevice(string? portName)
             args.ProgressLevel = 100.0f;
             FileUploadProgress?.Invoke(this, args);
 
-            response = await SendCommandAsync("\r\n", 1500, discardInBuffer: false);
+            // Wait for device OK response.
+            // For small files, all data is already flushed through USB and OK arrives directly.
+            response = await WaitForResponseAsync(2000);
+
+            // If no response, the USB CDC driver may be holding the last bytes.
+            // Send padding to force the driver to flush, then wait again.
+            if (string.IsNullOrEmpty(response))
+            {
+                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] No response after upload, sending flush padding");
+#if MACCATALYST
+                if (_useIOKit)
+                    _ioKitTransport?.SendLine("");
+                else
+#endif
+                    _serialPort?.WriteLine("");
+
+                response = await WaitForResponseAsync(3000);
+            }
+
             if (response.Contains("OK"))
             {
                 return true; // Success - CancelFileUpload will be called with success=true
             }
             else
             {
-                CancelFileUpload(false, UploadErrorType.DeviceError, 
+                CancelFileUpload(false, UploadErrorType.DeviceError,
                     "Device did not confirm successful upload");
                 return false;
             }
@@ -1584,9 +1645,12 @@ public class BusyTagDevice(string? portName)
         foreach (var item in FileList)
         {
             if (CurrentImageName == item.Name) continue;
-            if (item.Name.EndsWith("png") || item.Name.EndsWith("jpg") || item.Name.EndsWith("gif"))
+            if (FirmwareVersionFloat >= 2.0 ||
+                item.Name.EndsWith("png") || item.Name.EndsWith("jpg") || item.Name.EndsWith("gif"))
             {
-                return await DeleteFile(item.Name);
+                if (await DeleteFile(item.Name)) return true;
+                // Delete failed, skip to next file
+                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] AutoDeleteFile: Failed to delete {item.Name}, trying next file");
             }
         }
 
