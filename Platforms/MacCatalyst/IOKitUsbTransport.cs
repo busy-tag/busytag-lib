@@ -158,6 +158,11 @@ public class IOKitUsbTransport : IDisposable
     }
 
     /// <summary>
+    /// No-op flush — USB bulk transfers are sent synchronously.
+    /// </summary>
+    public void Flush() { }
+
+    /// <summary>
     /// Send a string as an AT command. The native layer appends \r\n.
     /// </summary>
     public bool SendLine(string command)
