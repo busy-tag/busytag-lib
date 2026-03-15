@@ -18,9 +18,9 @@ public class BusyTagDevice(string? portName)
     public event EventHandler<bool>? ConnectionStateChanged;
     public event EventHandler<bool>? ReceivedDeviceBasicInformation;
     public event EventHandler<LedArgs>? ReceivedSolidColor;
-    public event EventHandler<List<PatternLine>>? ReceivedPattern;
-    public event EventHandler<WifiConfigArgs>? ReceivedWifiConfig;
-    public event EventHandler<bool>? ReceivedUsbMassStorageActive;
+    // public event EventHandler<List<PatternLine>>? ReceivedPattern;
+    // public event EventHandler<WifiConfigArgs>? ReceivedWifiConfig;
+    // public event EventHandler<bool>? ReceivedUsbMassStorageActive;
     public event EventHandler<int>? ReceivedDisplayBrightness;
     public event EventHandler<List<FileStruct>>? FileListUpdated;
     public event EventHandler<FileUploadFinishedArgs>? FileUploadFinished;
