@@ -64,6 +64,21 @@
         <None Include="LICENSE" Pack="true" PackagePath="\" />
     </ItemGroup>
 
+    <!-- Bundled esptool standalone executables for firmware recovery -->
+    <ItemGroup Condition="!$(TargetFramework.Contains('android')) AND !$(TargetFramework.Contains('ios'))">
+        <Content Include="Tools\win\esptool.exe" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="Tools\macos\esptool" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="Tools\linux\esptool" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- Embedded firmware binaries for ESP32-S3 recovery -->
+    <ItemGroup>
+        <EmbeddedResource Include="Firmware\bootloader.bin" LogicalName="BusyTag.Lib.Firmware.bootloader.bin" />
+        <EmbeddedResource Include="Firmware\partition-table.bin" LogicalName="BusyTag.Lib.Firmware.partition-table.bin" />
+        <EmbeddedResource Include="Firmware\file_server.bin" LogicalName="BusyTag.Lib.Firmware.file_server.bin" />
+        <EmbeddedResource Include="Firmware\ota_data_initial.bin" LogicalName="BusyTag.Lib.Firmware.ota_data_initial.bin" />
+    </ItemGroup>
+
     <!-- Dependencies -->
     <ItemGroup>
         <PackageReference Include="System.IO.Ports" Version="9.0.14" />
