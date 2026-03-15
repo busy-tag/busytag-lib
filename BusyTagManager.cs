@@ -2,6 +2,7 @@
 using System.IO.Ports;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using BusyTag.Lib.Util;
 
 #if WINDOWS || WINDOWS10_0_19041_0_OR_GREATER
 using System.Management;
@@ -11,11 +12,21 @@ namespace BusyTag.Lib;
 
 public class BusyTagManager : IDisposable
 {
+    // Normal operating mode: TinyUSB CDC with custom PID
+    private const string NormalModeVid = "303A";
+    private const string NormalModePid = "81DF";
+
+    // ESP32-S3 native USB boot/download mode
+    private const string BootModeVid = "303A";
+    private const string BootModePid = "1001";
+
     public event EventHandler<List<string>?>? FoundBusyTagSerialDevices;
+    public event EventHandler<List<BusyTagDeviceInfo>>? FoundBusyTagDevicesDetailed;
     public event EventHandler<string>? DeviceConnected;
     public event EventHandler<string>? DeviceDisconnected;
-    
+
     private List<string>? _busyTagSerialDevices = new();
+    private List<BusyTagDeviceInfo> _busyTagDevicesDetailed = new();
     private List<string>? _previousBusyTagSerialDevices = new();
     private static bool _isScanningForDevices = false;
     private Timer? _periodicSearchTimer;
@@ -71,6 +82,14 @@ public class BusyTagManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Resets the scanning flag. Use when the flag gets stuck due to async race conditions.
+    /// </summary>
+    public void ResetScanState()
+    {
+        _isScanningForDevices = false;
+    }
+
     public async Task<List<string>?> FindBusyTagDevice()
     {
         if (_isScanningForDevices) return null;
@@ -106,6 +125,12 @@ public class BusyTagManager : IDisposable
         _isScanningForDevices = false;
         return null;
     }
+
+    /// <summary>
+    /// Returns detailed device info including boot-mode devices.
+    /// Call after FindBusyTagDevice() or use independently.
+    /// </summary>
+    public List<BusyTagDeviceInfo> GetLastDetailedDevices() => _busyTagDevicesDetailed;
 
     private static bool IsRunningOnIOS()
     {
@@ -197,10 +222,7 @@ public class BusyTagManager : IDisposable
     {
         try
         {
-            const string vid = "303A";
-            const string pid = "81DF";
-            
-            return await Task.Run(() => FindPortByVidPidWindows(vid, pid));
+            return await Task.Run(FindPortByVidPidWindows);
         }
         catch (Exception ex)
         {
@@ -211,10 +233,12 @@ public class BusyTagManager : IDisposable
         }
     }
     
-    private List<string>? FindPortByVidPidWindows(string vid, string pid)
+    private List<string>? FindPortByVidPidWindows()
     {
-        var deviceId = $"VID_{vid}&PID_{pid}";
+        var normalDeviceId = $"VID_{NormalModeVid}&PID_{NormalModePid}";
+        var bootDeviceId = $"VID_{BootModeVid}&PID_{BootModePid}";
         var foundDevices = new List<string>();
+        var detailedDevices = new List<BusyTagDeviceInfo>();
 
         try
         {
@@ -227,37 +251,77 @@ public class BusyTagManager : IDisposable
                 foreach (ManagementObject device in searcher.Get())
                 {
                     var deviceIdStr = device["DeviceID"]?.ToString();
+                    if (deviceIdStr == null) continue;
 
-                    if (deviceIdStr != null && deviceIdStr.Contains(deviceId))
+                    BusyTagDeviceMode? mode = null;
+                    if (deviceIdStr.Contains(normalDeviceId, StringComparison.OrdinalIgnoreCase))
+                        mode = BusyTagDeviceMode.Normal;
+                    else if (deviceIdStr.Contains(bootDeviceId, StringComparison.OrdinalIgnoreCase))
+                        mode = BusyTagDeviceMode.BootLoader;
+
+                    if (mode == null) continue;
+
+                    // Check if it's a COM port
+                    var name = device["Name"]?.ToString();
+                    if (name != null && name.Contains("COM"))
                     {
-                        // Check if it's a COM port
-                        var name = device["Name"]?.ToString();
-                        if (name != null && name.Contains("COM"))
+                        var match = System.Text.RegularExpressions.Regex.Match(name, @"COM(\d+)");
+                        if (match.Success)
                         {
-                            // Extract COM port number
-                            var match = System.Text.RegularExpressions.Regex.Match(name, @"COM(\d+)");
-                            if (match.Success)
+                            var port = $"COM{match.Groups[1].Value}";
+                            var vid = mode == BusyTagDeviceMode.Normal ? NormalModeVid : BootModeVid;
+                            var pid = mode == BusyTagDeviceMode.Normal ? NormalModePid : BootModePid;
+
+                            detailedDevices.Add(new BusyTagDeviceInfo
                             {
-                                var port = $"COM{match.Groups[1].Value}";
+                                PortName = port, Mode = mode.Value, Vid = vid, Pid = pid
+                            });
+
+                            // Only add normal-mode devices to the backward-compatible list
+                            if (mode == BusyTagDeviceMode.Normal)
                                 foundDevices.Add(port);
-                            }
                         }
                     }
                 }
             }
 #else
             // Use runtime reflection to access System.Management when not available at compile-time
-            foundDevices = FindPortByVidPidWindowsViaReflection(deviceId);
+            var normalPorts = FindPortByVidPidWindowsViaReflection(normalDeviceId);
+            var bootPorts = FindPortByVidPidWindowsViaReflection(bootDeviceId);
+
+            if (EnableVerboseLogging)
+            {
+                Debug.WriteLine($"[DEBUG] Reflection WMI: normal={normalPorts.Count}, boot={bootPorts.Count}");
+                Console.WriteLine($"  [DEBUG] WMI scan: normal={normalPorts.Count}, boot={bootPorts.Count}");
+            }
+
+            foreach (var port in normalPorts)
+            {
+                foundDevices.Add(port);
+                detailedDevices.Add(new BusyTagDeviceInfo
+                {
+                    PortName = port, Mode = BusyTagDeviceMode.Normal, Vid = NormalModeVid, Pid = NormalModePid
+                });
+            }
+            foreach (var port in bootPorts)
+            {
+                detailedDevices.Add(new BusyTagDeviceInfo
+                {
+                    PortName = port, Mode = BusyTagDeviceMode.BootLoader, Vid = BootModeVid, Pid = BootModePid
+                });
+            }
 #endif
 
             lock (_lockObject)
             {
                 _busyTagSerialDevices = foundDevices;
+                _busyTagDevicesDetailed = detailedDevices;
                 CheckForDeviceChanges();
             }
 
             _isScanningForDevices = false;
             FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
+            FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
             return _busyTagSerialDevices;
         }
         catch (Exception ex)
@@ -281,20 +345,34 @@ public class BusyTagManager : IDisposable
         try
         {
             // Try to load System.Management assembly at runtime
-            var assembly = Assembly.Load("System.Management");
+            Assembly? assembly;
+            try
+            {
+                assembly = Assembly.Load("System.Management");
+            }
+            catch (Exception ex)
+            {
+                if (EnableVerboseLogging)
+                    Console.WriteLine($"  [DEBUG] System.Management assembly load failed: {ex.Message}");
+                return foundDevices;
+            }
+
             if (assembly == null)
             {
                 if (EnableVerboseLogging)
-                    Debug.WriteLine("[DEBUG] System.Management assembly not found at runtime");
+                    Console.WriteLine("  [DEBUG] System.Management assembly not found at runtime");
                 return foundDevices;
             }
+
+            if (EnableVerboseLogging)
+                Console.WriteLine($"  [DEBUG] System.Management loaded from: {assembly.Location}");
 
             // Get the ManagementObjectSearcher type
             var searcherType = assembly.GetType("System.Management.ManagementObjectSearcher");
             if (searcherType == null)
             {
                 if (EnableVerboseLogging)
-                    Debug.WriteLine("[DEBUG] ManagementObjectSearcher type not found");
+                    Console.WriteLine("  [DEBUG] ManagementObjectSearcher type not found");
                 return foundDevices;
             }
 
@@ -304,7 +382,7 @@ public class BusyTagManager : IDisposable
             if (searcher == null)
             {
                 if (EnableVerboseLogging)
-                    Debug.WriteLine("[DEBUG] Failed to create ManagementObjectSearcher instance");
+                    Console.WriteLine("  [DEBUG] Failed to create ManagementObjectSearcher instance");
                 return foundDevices;
             }
 
@@ -315,7 +393,7 @@ public class BusyTagManager : IDisposable
                 if (getMethod == null)
                 {
                     if (EnableVerboseLogging)
-                        Debug.WriteLine("[DEBUG] Get method not found on ManagementObjectSearcher");
+                        Console.WriteLine("  [DEBUG] Get method not found on ManagementObjectSearcher");
                     return foundDevices;
                 }
 
@@ -323,15 +401,17 @@ public class BusyTagManager : IDisposable
                 if (collection == null)
                 {
                     if (EnableVerboseLogging)
-                        Debug.WriteLine("[DEBUG] WMI query returned null");
+                        Console.WriteLine("  [DEBUG] WMI query returned null");
                     return foundDevices;
                 }
 
+                int totalDevices = 0;
                 // Iterate through the collection
                 foreach (var device in (System.Collections.IEnumerable)collection)
                 {
                     try
                     {
+                        totalDevices++;
                         // ManagementObject uses indexer with string parameter - access via GetValue method
                         var deviceType = device.GetType();
 
@@ -357,8 +437,11 @@ public class BusyTagManager : IDisposable
                             }
                         }
 
-                        if (deviceIdValue != null && deviceIdValue.Contains(deviceId))
+                        if (deviceIdValue != null && deviceIdValue.Contains(deviceId, StringComparison.OrdinalIgnoreCase))
                         {
+                            if (EnableVerboseLogging)
+                                Console.WriteLine($"  [DEBUG] VID/PID match: {deviceIdValue} | Name: {nameValue}");
+
                             if (nameValue != null && nameValue.Contains("COM"))
                             {
                                 // Extract COM port number
@@ -367,8 +450,6 @@ public class BusyTagManager : IDisposable
                                 {
                                     var port = $"COM{match.Groups[1].Value}";
                                     foundDevices.Add(port);
-                                    if (EnableVerboseLogging)
-                                        Debug.WriteLine($"[DEBUG] Found device via WMI reflection: {port}");
                                 }
                             }
                         }
@@ -382,6 +463,9 @@ public class BusyTagManager : IDisposable
                         }
                     }
                 }
+
+                if (EnableVerboseLogging)
+                    Console.WriteLine($"  [DEBUG] WMI scanned {totalDevices} USB entities, matched {foundDevices.Count} for {deviceId}");
             }
             finally
             {
@@ -391,14 +475,11 @@ public class BusyTagManager : IDisposable
                     disposable.Dispose();
                 }
             }
-
-            if (EnableVerboseLogging)
-                Debug.WriteLine($"[DEBUG] WMI reflection found {foundDevices.Count} device(s)");
         }
         catch (Exception ex)
         {
             if (EnableVerboseLogging)
-                Debug.WriteLine($"[DEBUG] WMI reflection failed: {ex.Message}");
+                Console.WriteLine($"  [DEBUG] WMI reflection failed: {ex.GetType().Name}: {ex.Message}");
         }
 
         return foundDevices;
@@ -414,26 +495,52 @@ public class BusyTagManager : IDisposable
         {
             // Get USB device information
             var usbDevices = await GetMacOsUsbDevicesAsync();
-            
-            const string targetVid = "303A";
-            const string targetPid = "81DF";
 
-            const string key = $"{targetVid}:{targetPid}";
-            if (usbDevices.ContainsKey(key))
+            var normalKey = $"{NormalModeVid}:{NormalModePid}";
+            var bootKey = $"{BootModeVid}:{BootModePid}";
+            bool hasNormal = usbDevices.ContainsKey(normalKey);
+            bool hasBoot = usbDevices.ContainsKey(bootKey);
+
+            if (hasNormal || hasBoot)
             {
-                // Found the device, now find associated serial port
-                return await FindMacOsSerialPortAsync();
+                // Found a device, now find associated serial ports
+                var result = await FindMacOsSerialPortAsync();
+
+                // Add boot-mode entries to detailed list
+                if (hasBoot)
+                {
+                    var ports = SerialPort.GetPortNames();
+                    var usbPorts = ports.Where(p => p.StartsWith("/dev/cu.usbmodem")).ToArray();
+                    foreach (var port in usbPorts)
+                    {
+                        if (!_busyTagDevicesDetailed.Any(d => d.PortName == port))
+                        {
+                            _busyTagDevicesDetailed.Add(new BusyTagDeviceInfo
+                            {
+                                PortName = port,
+                                Mode = hasNormal ? BusyTagDeviceMode.Normal : BusyTagDeviceMode.BootLoader,
+                                Vid = BootModeVid,
+                                Pid = BootModePid
+                            });
+                        }
+                    }
+                    FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
+                }
+
+                return result;
             }
             else
             {
-                // Device not found, clear the list
+                // Device wasn't found, clear the list
                 lock (_lockObject)
                 {
                     _busyTagSerialDevices = new List<string>();
+                    _busyTagDevicesDetailed = new List<BusyTagDeviceInfo>();
                     CheckForDeviceChanges();
                 }
                 _isScanningForDevices = false;
                 FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
+                FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
             }
         }
         catch (Exception ex)
@@ -587,9 +694,6 @@ public class BusyTagManager : IDisposable
     {
         try
         {
-            const string targetVid = "303A";
-            const string targetPid = "81DF";  
-
             // Use lsusb to find the device
             var process = new Process
             {
@@ -607,10 +711,31 @@ public class BusyTagManager : IDisposable
             var output = await process.StandardOutput.ReadToEndAsync();
             await process.WaitForExitAsync();
 
-            if (output.Contains($"{targetVid}:{targetPid}"))
+            var normalId = $"{NormalModeVid}:{NormalModePid}";
+            var bootId = $"{BootModeVid}:{BootModePid}";
+            bool hasNormal = output.Contains(normalId, StringComparison.OrdinalIgnoreCase);
+            bool hasBoot = output.Contains(bootId, StringComparison.OrdinalIgnoreCase);
+
+            if (hasNormal || hasBoot)
             {
-                // Device found, look for an associated tty device
-                return await FindLinuxSerialPortAsync();
+                var result = await FindLinuxSerialPortAsync();
+
+                if (hasBoot && !hasNormal)
+                {
+                    // All found ports are boot-mode devices
+                    lock (_lockObject)
+                    {
+                        _busyTagDevicesDetailed = _busyTagSerialDevices?
+                            .Select(p => new BusyTagDeviceInfo
+                            {
+                                PortName = p, Mode = BusyTagDeviceMode.BootLoader,
+                                Vid = BootModeVid, Pid = BootModePid
+                            }).ToList() ?? new List<BusyTagDeviceInfo>();
+                    }
+                    FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
+                }
+
+                return result;
             }
             else
             {
@@ -618,10 +743,12 @@ public class BusyTagManager : IDisposable
                 lock (_lockObject)
                 {
                     _busyTagSerialDevices = new List<string>();
+                    _busyTagDevicesDetailed = new List<BusyTagDeviceInfo>();
                     CheckForDeviceChanges();
                 }
                 _isScanningForDevices = false;
                 FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
+                FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
             }
         }
         catch (Exception ex)
