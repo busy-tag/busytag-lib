@@ -1,7 +1,8 @@
-#if MACCATALYST
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+#if MACCATALYST
 using ObjCRuntime;
+#endif
 
 namespace BusyTag.Lib.Platforms.MacCatalyst;
 
@@ -12,7 +13,11 @@ namespace BusyTag.Lib.Platforms.MacCatalyst;
 /// </summary>
 public class IOKitUsbTransport : IDisposable
 {
+#if MACCATALYST
     private const string LibName = "@rpath/BusyTagUSBDriver.framework/BusyTagUSBDriver";
+#else
+    private const string LibName = "BusyTagUSBDriver";
+#endif
 
     // MARK: - Native P/Invoke declarations
 
@@ -173,7 +178,9 @@ public class IOKitUsbTransport : IDisposable
 
     // MARK: - Static callbacks (P/Invoke requires static methods)
 
+#if MACCATALYST
     [MonoPInvokeCallback(typeof(DataCallbackDelegate))]
+#endif
     private static void OnDataReceived(IntPtr data, int length, IntPtr context)
     {
         try
@@ -197,7 +204,9 @@ public class IOKitUsbTransport : IDisposable
         }
     }
 
+#if MACCATALYST
     [MonoPInvokeCallback(typeof(ConnectionCallbackDelegate))]
+#endif
     private static void OnConnectionChanged(int connected, IntPtr context)
     {
         try
@@ -220,7 +229,9 @@ public class IOKitUsbTransport : IDisposable
         }
     }
 
+#if MACCATALYST
     [MonoPInvokeCallback(typeof(LogCallbackDelegate))]
+#endif
     private static void OnLogMessage(IntPtr message, IntPtr context)
     {
         try
@@ -264,4 +275,3 @@ public class IOKitUsbTransport : IDisposable
         Dispose();
     }
 }
-#endif

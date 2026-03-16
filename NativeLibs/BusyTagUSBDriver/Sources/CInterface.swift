@@ -79,30 +79,18 @@ public func btusb_destroy(_ rawHandle: UnsafeMutableRawPointer) {
 }
 
 /// Start monitoring for USB device connections (VID:0x303A, PID:0x81DF).
-/// Must be called from the main thread, or will dispatch to it synchronously.
+/// Called directly from the calling thread — IOKit notification ports use their own run loop source.
 @_cdecl("btusb_start_monitoring")
 public func btusb_start_monitoring(_ rawHandle: UnsafeMutableRawPointer) {
     let handle = Unmanaged<ManagedHandle>.fromOpaque(rawHandle).takeUnretainedValue()
-    if Thread.isMainThread {
-        handle.manager.startMonitoring()
-    } else {
-        DispatchQueue.main.sync {
-            handle.manager.startMonitoring()
-        }
-    }
+    handle.manager.startMonitoring()
 }
 
 /// Stop monitoring for USB device connections.
 @_cdecl("btusb_stop_monitoring")
 public func btusb_stop_monitoring(_ rawHandle: UnsafeMutableRawPointer) {
     let handle = Unmanaged<ManagedHandle>.fromOpaque(rawHandle).takeUnretainedValue()
-    if Thread.isMainThread {
-        handle.manager.stopMonitoring()
-    } else {
-        DispatchQueue.main.sync {
-            handle.manager.stopMonitoring()
-        }
-    }
+    handle.manager.stopMonitoring()
 }
 
 /// Returns 1 if the USB device is connected (interface seized, endpoints ready), 0 otherwise.

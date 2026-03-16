@@ -506,26 +506,24 @@ public class BusyTagManager : IDisposable
                 // Found a device, now find associated serial ports
                 var result = await FindMacOsSerialPortAsync();
 
-                // Add boot-mode entries to detailed list
-                if (hasBoot)
+                // Populate detailed device list for all found ports
+                var ports = SerialPort.GetPortNames();
+                var usbPorts = ports.Where(p => p.StartsWith("/dev/cu.usbmodem")).ToArray();
+                foreach (var port in usbPorts)
                 {
-                    var ports = SerialPort.GetPortNames();
-                    var usbPorts = ports.Where(p => p.StartsWith("/dev/cu.usbmodem")).ToArray();
-                    foreach (var port in usbPorts)
+                    if (!_busyTagDevicesDetailed.Any(d => d.PortName == port))
                     {
-                        if (!_busyTagDevicesDetailed.Any(d => d.PortName == port))
+                        var mode = hasBoot && !hasNormal ? BusyTagDeviceMode.BootLoader : BusyTagDeviceMode.Normal;
+                        _busyTagDevicesDetailed.Add(new BusyTagDeviceInfo
                         {
-                            _busyTagDevicesDetailed.Add(new BusyTagDeviceInfo
-                            {
-                                PortName = port,
-                                Mode = hasNormal ? BusyTagDeviceMode.Normal : BusyTagDeviceMode.BootLoader,
-                                Vid = BootModeVid,
-                                Pid = BootModePid
-                            });
-                        }
+                            PortName = port,
+                            Mode = mode,
+                            Vid = mode == BusyTagDeviceMode.BootLoader ? BootModeVid : NormalModeVid,
+                            Pid = mode == BusyTagDeviceMode.BootLoader ? BootModePid : NormalModePid
+                        });
                     }
-                    FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
                 }
+                FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
 
                 return result;
             }
