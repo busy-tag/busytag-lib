@@ -28,17 +28,17 @@ A powerful and intuitive .NET library for seamless BusyTag device management via
 
 ### Package Manager Console
 ```powershell
-Install-Package BusyTag.Lib -Version 0.6.0
+Install-Package BusyTag.Lib -Version 0.6.1
 ```
 
 ### .NET CLI
 ```bash
-dotnet add package BusyTag.Lib --version 0.6.0
+dotnet add package BusyTag.Lib --version 0.6.1
 ```
 
 ### PackageReference
 ```xml
-<PackageReference Include="BusyTag.Lib" Version="0.6.0" />
+<PackageReference Include="BusyTag.Lib" Version="0.6.1" />
 ```
 
 ## 🖥️ Platform Support
@@ -120,7 +120,11 @@ if (devices?.Any() == true)
 
 ## 🔄 Changelog
 
-### v0.6.0 (Current)
+### v0.6.1 (Current)
+- 🔧 **NuGet packaging fix** - Fixed esptool binaries not being copied to output when consumed as a NuGet package
+- 📦 Added `.targets` file and transitive build support for proper esptool binary deployment
+
+### v0.6.0
 - ☁️ **Cloud connectivity** - New `BusyTagCloudClient` for remote device control, heartbeat, event tracking, and pending command handling
 - 📡 **WebSocket support** - New `BusyTagWebSocketClient` for real-time device status monitoring and LED status tracking
 - 📶 **Wi-Fi scanning** - New `BusyTagHttpClient` with async Wi-Fi network scanning, retry logic, and local server token management
