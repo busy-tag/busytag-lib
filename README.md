@@ -4,36 +4,40 @@
 [![Downloads](https://img.shields.io/nuget/dt/BusyTag.Lib.svg)](https://www.nuget.org/packages/BusyTag.Lib/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%209.0-blue)](https://dotnet.microsoft.com/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)](https://github.com/busy-tag/busytag-lib)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/busy-tag/busytag-lib)
 
-A powerful and intuitive .NET library for seamless BusyTag device management via serial communication. Control LED patterns, manage files, and configure devices across Windows and macOS platforms with ease.
+A powerful and intuitive .NET library for seamless BusyTag device management via USB serial and cloud communication. Control LED patterns, manage files, configure devices, and connect to the BusyTag cloud across Windows, macOS, and Linux platforms.
 
 ## 🚀 Key Features
 
-- **🔍 Cross-platform device discovery** - Automatic detection on Windows and macOS
-- **📡 Robust serial communication** - Reliable connection management with automatic reconnection
-- **📁 Complete file management** - Upload, download, and delete files with real-time progress tracking
+- **🔍 Cross-platform device discovery** - Automatic detection on Windows, macOS, and Linux (experimental)
+- **📡 Robust serial communication** - 1.5 Mbps connection with semaphore-based buffer handling and automatic reconnection
+- **📁 Complete file management** - Upload, download, and delete files with chunked transfers and real-time progress tracking
 - **💡 Advanced LED control** - Solid colors, custom patterns, and predefined animations
-- **⚙️ Device configuration** - Brightness, storage, Wi-Fi, and system settings management
+- **⚙️ Device configuration** - Brightness, storage, Wi-Fi scanning, and system settings management
 - **📢 Real-time notifications** - Comprehensive event system for all device operations
-- **🔄 Firmware update support** - Built-in firmware update capabilities with progress tracking
+- **☁️ Cloud connectivity** - WebSocket and cloud client for remote device control, heartbeat, and event tracking
+- **📶 Wi-Fi management** - Wi-Fi network scanning with structured results and retry logic
+- **🔧 ESP32-S3 firmware recovery** - Built-in esptool integration with embedded firmware for device recovery
+- **🖥️ Mac Catalyst USB driver** - Native IOKit-based USB transport for macOS applications
+- **🔄 Bootloader detection** - Automatic detection of devices in boot/recovery mode
 - **🎨 Rich pattern library** - 30+ predefined LED patterns including police, running lights, and pulses
 
 ## 📦 Installation
 
 ### Package Manager Console
 ```powershell
-Install-Package BusyTag.Lib -Version 0.5.4
+Install-Package BusyTag.Lib -Version 0.6.0
 ```
 
 ### .NET CLI
 ```bash
-dotnet add package BusyTag.Lib --version 0.5.4
+dotnet add package BusyTag.Lib --version 0.6.0
 ```
 
 ### PackageReference
 ```xml
-<PackageReference Include="BusyTag.Lib" Version="0.5.4" />
+<PackageReference Include="BusyTag.Lib" Version="0.6.0" />
 ```
 
 ## 🖥️ Platform Support
@@ -52,17 +56,12 @@ dotnet add package BusyTag.Lib --version 0.5.4
 - **Permissions**: May require accessibility permissions for serial access
 - **Tested on**: macOS 10.15+ (Catalina and newer)
 
-### Linux (Coming Soon)
-- **Status**: Support temporarily disabled - not fully tested
-- **Note**: Linux support is planned for a future release
-- **Experimental**: Can be enabled via `EnableExperimentalLinuxSupport` flag (not recommended for production)
-
-<!-- When Linux support is fully enabled:
+### Linux (Experimental)
 - **Device Discovery**: `lsusb` command-line tool + AT command validation
 - **Port Format**: `/dev/ttyUSB0`, `/dev/ttyACM0`, etc.
 - **Requirements**: `usbutils` package
 - **Permissions**: User must be in `dialout` group: `sudo usermod -a -G dialout $USER`
--->
+- **Status**: Experimental - enable via `EnableExperimentalLinuxSupport = true` on `BusyTagManager`
 
 ## 🏃‍♂️ Quick Start
 
@@ -74,7 +73,7 @@ using BusyTag.Lib;
 // Create and configure the manager
 using var manager = new BusyTagManager();
 
-// Optional: Enable experimental Linux support (not recommended)
+// Optional: Enable experimental Linux support
 // manager.EnableExperimentalLinuxSupport = true;
 
 // Subscribe to device events
@@ -113,17 +112,37 @@ if (devices?.Any() == true)
 - **Operating Systems**:
   - Windows 10 version 1903 or later
   - macOS 10.15 (Catalina) or later
-  - Linux support coming soon (experimental flag available)
+  - Linux (experimental, enable via `EnableExperimentalLinuxSupport`)
 - **Hardware**: BusyTag device with compatible firmware (v0.7+)
 - **Permissions**: Serial port access rights
 - **Dependencies**: See table below
 
 ## 🔄 Changelog
 
-### v0.5.4 (Current)
-- 🔧 Additional library updates and improvements
+### v0.6.0 (Current)
+- ☁️ **Cloud connectivity** - New `BusyTagCloudClient` for remote device control, heartbeat, event tracking, and pending command handling
+- 📡 **WebSocket support** - New `BusyTagWebSocketClient` for real-time device status monitoring and LED status tracking
+- 📶 **Wi-Fi scanning** - New `BusyTagHttpClient` with async Wi-Fi network scanning, retry logic, and local server token management
+- 🔧 **ESP32-S3 firmware recovery** - New `EspToolRunner` and `FirmwarePackage` for firmware flashing with bundled esptool executables and embedded firmware
+- 🖥️ **Mac Catalyst USB driver** - Native IOKit-based `IOKitUsbTransport` for Mac Catalyst applications with `BusyTagUSBDriver.framework`
+- 🌐 Expanded macOS platform detection to include Darwin identifiers
+- 🔧 Refactored USB communication logic and build system for improved macOS compatibility
+- 🏗️ Added native macOS `libBusyTagUSBDriver.dylib` for direct USB communication
+- 🔍 **Bootloader detection** - New `BusyTagDeviceInfo` class with detailed device scanning and boot mode detection in `BusyTagManager`
+- 🚀 **1.5 Mbps serial speed** - Increased serial port speed for faster file transfers with optimized chunking and throttled progress updates
+- 🛡️ **Storage integrity validation** - Cache cleanup logic, storage auto-delete functionality, and reflection-based WMI fallback detection
+- 📡 **Improved SendCommandAsync** - Semaphore-based buffer handling for better reliability and optimized storage drive detection
+- 🐛 **File upload improvements** - Better response handling with `WaitForResponseAsync`, improved `+FSS:` response parsing, and file deletion error handling
+- 📱 **iOS platform detection** - Prevents USB discovery errors on iOS
+- 🏷️ **Rebranded** to "SIA BUSY TAG" across identifiers, metadata, and documentation
+- 📦 Updated dependencies to v9.0.14 (System.IO.Ports, System.Text.Json, System.Management)
+- ✨ Added `FirmwareUpdateError` event, `CurrentUploadFileName` property, and `IsWritingToStorage` flag
+- 🔧 Refactored `SetStorageAutoDeleteAsync` to `SetShowAfterDropAsync`
+- ✨ Code cleanup and streamlined event handlers in `BusyTagDevice`
+
+### v0.5.4
+- 🔧 Minor fixes after retesting on Windows
 - 📚 Updated documentation and version synchronization
-- ✨ Continued stability enhancements
 
 ### v0.5.3
 - 🔧 Library updates and improvements
@@ -132,10 +151,8 @@ if (devices?.Any() == true)
 - ✨ Performance improvements and stability enhancements
 
 ### v0.5.2
-- 🔧 Linux support temporarily disabled pending further testing
-- ✨ Added `EnableExperimentalLinuxSupport` flag for future Linux testing
+- 🔧 Linux support added as experimental via `EnableExperimentalLinuxSupport` flag
 - 📚 Improved platform detection and stability for Windows and macOS
-- 📝 Updated documentation to reflect current platform support
 
 ### v0.5.0
 - ✨ Enhanced SendCommandAsync implementation
@@ -145,24 +162,20 @@ if (devices?.Any() == true)
 
 ### v0.4.0
 - 🚀 Added support for .NET 9.0
-- 📦 Updated dependencies to latest versions (System.IO.Ports 9.0.7, System.Text.Json 9.0.7)
+- 📦 Updated dependencies to latest versions
 - 🔧 Improved cross-platform compatibility
 
 ### v0.3.0
 - 🔧 Project configuration updates
 - 📱 Better support for Mac Catalyst builds
-- 🏗️ Improved build system for multi-platform targets
 
 ### v0.2.3
 - 📚 Updated documentation and examples
-- 🔍 Added more detailed usage examples
-- 📋 Improved API documentation
 
 ### v0.2.2
 - ✨ Enhanced device discovery reliability
 - 🐛 Fixed memory leaks in long-running applications
 - 📱 Improved macOS serial port detection
-- 🔧 Better error handling for connection failures
 
 ### v0.2.1
 - 🚀 Initial public release
