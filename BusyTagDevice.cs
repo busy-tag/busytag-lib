@@ -103,7 +103,10 @@ public class BusyTagDevice(string? portName)
     public async Task Connect()
     {
         // Try IOKit USB Bulk Transfer first on macOS (much faster than serial port)
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        // Note: IsOSPlatform(OSPlatform.OSX) returns false on Mac Catalyst, so also check Darwin.
+        // Exclude iOS since it's also Darwin-based but doesn't have IOKit.
+        if ((RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ||
+             RuntimeInformation.OSDescription.Contains("Darwin")))
         {
             try
             {

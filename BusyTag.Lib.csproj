@@ -93,10 +93,6 @@
         <UseWPF>false</UseWPF>
     </PropertyGroup>
 
-<!--    <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0-maccatalyst'">-->
-<!--        <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>-->
-<!--    </PropertyGroup>-->
-
     <!-- Mac Catalyst: IOKit USB Bulk Transfer native framework (for MAUI apps) -->
     <ItemGroup Condition="'$(TargetFramework)' == 'net9.0-maccatalyst'">
         <NativeReference Include="Platforms\MacCatalyst\BusyTagUSBDriver.framework">
@@ -109,9 +105,5 @@
     <ItemGroup Condition="'$(TargetFramework)' != 'net9.0-maccatalyst' AND !$(TargetFramework.Contains('android')) AND !$(TargetFramework.Contains('ios'))">
         <Content Include="Platforms\macOS\libBusyTagUSBDriver.dylib" Link="libBusyTagUSBDriver.dylib" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
-
-<!--    <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0-android'">-->
-<!--        <SupportedOSPlatformVersion>21.0</SupportedOSPlatformVersion>-->
-<!--    </PropertyGroup>-->
 
 </Project>
