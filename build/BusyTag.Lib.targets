@@ -1,0 +1,43 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!-- Copy bundled esptool executables to the consuming project's output directory -->
+  <Target Name="CopyBusyTagEspTools" AfterTargets="Build">
+    <PropertyGroup>
+      <BusyTagToolsSource>$(MSBuildThisFileDirectory)..\tools\</BusyTagToolsSource>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <BusyTagEspToolFiles Include="$(BusyTagToolsSource)**\*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(BusyTagEspToolFiles)"
+          DestinationFiles="@(BusyTagEspToolFiles->'$(OutputPath)Tools\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+
+    <!-- Set execute permission on Unix -->
+    <Exec Command="chmod +x '$(OutputPath)Tools/macos/esptool' '$(OutputPath)Tools/linux/esptool'"
+          Condition="'$(OS)' != 'Windows_NT'"
+          IgnoreExitCode="true" />
+  </Target>
+
+  <!-- Also copy on Publish -->
+  <Target Name="CopyBusyTagEspToolsPublish" AfterTargets="Publish">
+    <PropertyGroup>
+      <BusyTagToolsSource>$(MSBuildThisFileDirectory)..\tools\</BusyTagToolsSource>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <BusyTagEspToolFilesPublish Include="$(BusyTagToolsSource)**\*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(BusyTagEspToolFilesPublish)"
+          DestinationFiles="@(BusyTagEspToolFilesPublish->'$(PublishDir)Tools\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+
+    <!-- Set execute permission on Unix -->
+    <Exec Command="chmod +x '$(PublishDir)Tools/macos/esptool' '$(PublishDir)Tools/linux/esptool'"
+          Condition="'$(OS)' != 'Windows_NT'"
+          IgnoreExitCode="true" />
+  </Target>
+
+</Project>

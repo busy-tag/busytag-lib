@@ -15,9 +15,9 @@
 
         <!-- NuGet Package Information -->
         <PackageId>BusyTag.Lib</PackageId>
-        <Version>0.6.0</Version>
-        <AssemblyVersion>0.6.0.0</AssemblyVersion>
-        <FileVersion>0.6.0.0</FileVersion>
+        <Version>0.6.1</Version>
+        <AssemblyVersion>0.6.1.0</AssemblyVersion>
+        <FileVersion>0.6.1.0</FileVersion>
 
         <!-- Package Metadata -->
         <Title>BusyTag Device Management Library</Title>
@@ -43,6 +43,7 @@
 
         <!-- Release Notes -->
         <PackageReleaseNotes>
+            v0.6.1 - Fix esptool binaries not being copied to output when consumed as a NuGet package.
             v0.6.0 - Cloud connectivity (WebSocket and cloud client), Wi-Fi scanning, ESP32-S3 firmware recovery, Mac Catalyst USB driver, bootloader detection, 1.5 Mbps serial speed, storage integrity validation, expanded macOS/Linux support, updated dependencies to v9.0.14.
             v0.5.4 - Minor fixes after retesting on Windows.
             v0.5.3 - Library updates and improvements. Fixed issue for device finding on newest macOS version.
@@ -65,10 +66,20 @@
     </ItemGroup>
 
     <!-- Bundled esptool standalone executables for firmware recovery -->
+    <!-- Copy to output for direct project references -->
     <ItemGroup Condition="!$(TargetFramework.Contains('android')) AND !$(TargetFramework.Contains('ios'))">
         <Content Include="Tools\win\esptool.exe" CopyToOutputDirectory="PreserveNewest" />
         <Content Include="Tools\macos\esptool" CopyToOutputDirectory="PreserveNewest" />
         <Content Include="Tools\linux\esptool" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- Pack esptool binaries and .targets file into the NuGet package for package consumers -->
+    <ItemGroup>
+        <None Include="Tools\win\esptool.exe" Pack="true" PackagePath="tools\win\" />
+        <None Include="Tools\macos\esptool" Pack="true" PackagePath="tools\macos\" />
+        <None Include="Tools\linux\esptool" Pack="true" PackagePath="tools\linux\" />
+        <None Include="build\BusyTag.Lib.targets" Pack="true" PackagePath="build\" />
+        <None Include="build\BusyTag.Lib.targets" Pack="true" PackagePath="buildTransitive\BusyTag.Lib.targets" />
     </ItemGroup>
 
     <!-- Embedded firmware binaries for ESP32-S3 recovery -->
