@@ -141,11 +141,14 @@ public class BusyTagDevice(string? portName)
                 }
 
                 Debug.WriteLine("[IOKit] Connection timed out, falling back to serial port...");
-                _ioKitTransport.DataReceived -= IOKit_DataReceived;
-                _ioKitTransport.ConnectionChanged -= IOKit_ConnectionChanged;
-                _ioKitTransport.StopMonitoring();
-                _ioKitTransport.Dispose();
-                _ioKitTransport = null;
+                if (_ioKitTransport != null)
+                {
+                    _ioKitTransport.DataReceived -= IOKit_DataReceived;
+                    _ioKitTransport.ConnectionChanged -= IOKit_ConnectionChanged;
+                    _ioKitTransport.StopMonitoring();
+                    _ioKitTransport.Dispose();
+                    _ioKitTransport = null;
+                }
             }
             catch (Exception ex)
             {
