@@ -28,17 +28,17 @@ A powerful and intuitive .NET library for seamless BusyTag device management via
 
 ### Package Manager Console
 ```powershell
-Install-Package BusyTag.Lib -Version 0.6.1
+Install-Package BusyTag.Lib -Version 0.6.2
 ```
 
 ### .NET CLI
 ```bash
-dotnet add package BusyTag.Lib --version 0.6.1
+dotnet add package BusyTag.Lib --version 0.6.2
 ```
 
 ### PackageReference
 ```xml
-<PackageReference Include="BusyTag.Lib" Version="0.6.1" />
+<PackageReference Include="BusyTag.Lib" Version="0.6.2" />
 ```
 
 ## 🖥️ Platform Support
@@ -120,7 +120,11 @@ if (devices?.Any() == true)
 
 ## 🔄 Changelog
 
-### v0.6.1 (Current)
+### v0.6.2 (Current)
+- 🔧 **Native macOS USB driver packaging fix** - Pack `libBusyTagUSBDriver.dylib` as `runtimes/osx/native/` runtime asset for proper DllImport resolution in dotnet tool installs and self-contained publish scenarios
+- 📦 Added `.targets` copy step for native USB driver during build and publish
+
+### v0.6.1
 - 🔧 **NuGet packaging fix** - Fixed esptool binaries not being copied to output when consumed as a NuGet package
 - 📦 Added `.targets` file and transitive build support for proper esptool binary deployment
 

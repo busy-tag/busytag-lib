@@ -20,6 +20,27 @@
           IgnoreExitCode="true" />
   </Target>
 
+  <!-- Copy native macOS USB driver to output -->
+  <Target Name="CopyBusyTagNativeDriver" AfterTargets="Build" Condition="'$(OS)' != 'Windows_NT'">
+    <PropertyGroup>
+      <BusyTagNativeSource>$(MSBuildThisFileDirectory)..\runtimes\osx\native\</BusyTagNativeSource>
+    </PropertyGroup>
+    <Copy SourceFiles="$(BusyTagNativeSource)libBusyTagUSBDriver.dylib"
+          DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(BusyTagNativeSource)libBusyTagUSBDriver.dylib')" />
+  </Target>
+
+  <Target Name="CopyBusyTagNativeDriverPublish" AfterTargets="Publish" Condition="'$(OS)' != 'Windows_NT'">
+    <PropertyGroup>
+      <BusyTagNativeSource>$(MSBuildThisFileDirectory)..\runtimes\osx\native\</BusyTagNativeSource>
+    </PropertyGroup>
+    <Copy SourceFiles="$(BusyTagNativeSource)libBusyTagUSBDriver.dylib"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(BusyTagNativeSource)libBusyTagUSBDriver.dylib')" />
+  </Target>
+
   <!-- Also copy on Publish -->
   <Target Name="CopyBusyTagEspToolsPublish" AfterTargets="Publish">
     <PropertyGroup>

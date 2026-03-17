@@ -15,9 +15,9 @@
 
         <!-- NuGet Package Information -->
         <PackageId>BusyTag.Lib</PackageId>
-        <Version>0.6.1</Version>
-        <AssemblyVersion>0.6.1.0</AssemblyVersion>
-        <FileVersion>0.6.1.0</FileVersion>
+        <Version>0.6.2</Version>
+        <AssemblyVersion>0.6.2.0</AssemblyVersion>
+        <FileVersion>0.6.2.0</FileVersion>
 
         <!-- Package Metadata -->
         <Title>BusyTag Device Management Library</Title>
@@ -43,6 +43,7 @@
 
         <!-- Release Notes -->
         <PackageReleaseNotes>
+            v0.6.2 - Pack native macOS USB driver (libBusyTagUSBDriver.dylib) as runtime asset for proper DllImport resolution in dotnet tool and self-contained publish scenarios. Add .targets copy for publish output.
             v0.6.1 - Fix esptool binaries not being copied to output when consumed as a NuGet package.
             v0.6.0 - Cloud connectivity (WebSocket and cloud client), Wi-Fi scanning, ESP32-S3 firmware recovery, Mac Catalyst USB driver, bootloader detection, 1.5 Mbps serial speed, storage integrity validation, expanded macOS/Linux support, updated dependencies to v9.0.14.
             v0.5.4 - Minor fixes after retesting on Windows.
@@ -115,6 +116,11 @@
     <!-- Plain macOS: IOKit USB dylib (for .NET console apps / CLI) -->
     <ItemGroup Condition="'$(TargetFramework)' != 'net9.0-maccatalyst' AND !$(TargetFramework.Contains('android')) AND !$(TargetFramework.Contains('ios'))">
         <Content Include="Platforms\macOS\libBusyTagUSBDriver.dylib" Link="libBusyTagUSBDriver.dylib" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- Pack native macOS USB driver as runtime asset so it's resolved by DllImport in all scenarios -->
+    <ItemGroup>
+        <None Include="Platforms\macOS\libBusyTagUSBDriver.dylib" Pack="true" PackagePath="runtimes\osx\native\" />
     </ItemGroup>
 
 </Project>
