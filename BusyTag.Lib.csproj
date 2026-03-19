@@ -70,8 +70,12 @@
     <!-- Copy to output for direct project references -->
     <ItemGroup Condition="!$(TargetFramework.Contains('android')) AND !$(TargetFramework.Contains('ios'))">
         <Content Include="Tools\win\esptool.exe" CopyToOutputDirectory="PreserveNewest" />
-        <Content Include="Tools\macos\esptool" CopyToOutputDirectory="PreserveNewest" />
-        <Content Include="Tools\linux\esptool" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="Tools\macos\esptool" CopyToOutputDirectory="PreserveNewest">
+            <PublishFolderType>Assembly</PublishFolderType>
+        </Content>
+        <Content Include="Tools\linux\esptool" CopyToOutputDirectory="PreserveNewest">
+            <PublishFolderType>Assembly</PublishFolderType>
+        </Content>
     </ItemGroup>
 
     <!-- Pack esptool binaries and .targets file into the NuGet package for package consumers -->

@@ -27,24 +27,26 @@ public class EspToolRunner
     public static string? FindEsptool()
     {
         bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-        bool isMacOS = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
         var exeName = isWindows ? "esptool.exe" : "esptool";
 
         // 1. Bundled: platform-specific Tools subdirectory
         var appDir = AppContext.BaseDirectory;
 
+        // Check platform-specific paths, prioritizing the current platform.
+        // Mac Catalyst reports as iOS (not macOS) at runtime, so we can't rely on
+        // RuntimeInformation.IsOSPlatform(OSPlatform.OSX). Instead, check the
+        // correct platform first based on what we can detect reliably.
         if (isWindows)
         {
             var winPath = Path.Combine(appDir, "Tools", "win", "esptool.exe");
             if (File.Exists(winPath)) return winPath;
         }
-        else if (isMacOS)
-        {
-            var macPath = Path.Combine(appDir, "Tools", "macos", "esptool");
-            if (File.Exists(macPath)) return macPath;
-        }
         else
         {
+            // On non-Windows (macOS, Mac Catalyst, Linux): check macOS first, then Linux
+            var macPath = Path.Combine(appDir, "Tools", "macos", "esptool");
+            if (File.Exists(macPath)) return macPath;
+
             var linuxPath = Path.Combine(appDir, "Tools", "linux", "esptool");
             if (File.Exists(linuxPath)) return linuxPath;
         }

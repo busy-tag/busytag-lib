@@ -493,53 +493,89 @@ public class BusyTagManager : IDisposable
     {
         try
         {
-            // Get USB device information
-            var usbDevices = await GetMacOsUsbDevicesAsync();
+            // Parse ioreg tree to get:
+            // 1. VID/PID-to-serial-port mappings (for devices that have IOSerialBSDClient children)
+            // 2. Set of all VID:PID pairs present (even devices without serial port children)
+            var (portMappings, vidPidsPresent) = await GetMacOsUsbDeviceInfoAsync();
 
-            var normalKey = $"{NormalModeVid}:{NormalModePid}";
+            var foundDevices = new List<string>();
+            var detailedDevices = new List<BusyTagDeviceInfo>();
+            var mappedPorts = new HashSet<string>();
+
+            // Process devices that have direct port mappings from ioreg
+            foreach (var mapping in portMappings)
+            {
+                BusyTagDeviceMode? mode = null;
+
+                if (mapping.vid.Equals(NormalModeVid, StringComparison.OrdinalIgnoreCase) &&
+                    mapping.pid.Equals(NormalModePid, StringComparison.OrdinalIgnoreCase))
+                {
+                    mode = BusyTagDeviceMode.Normal;
+                }
+                else if (mapping.vid.Equals(BootModeVid, StringComparison.OrdinalIgnoreCase) &&
+                         mapping.pid.Equals(BootModePid, StringComparison.OrdinalIgnoreCase))
+                {
+                    mode = BusyTagDeviceMode.BootLoader;
+                }
+
+                if (mode == null) continue;
+
+                detailedDevices.Add(new BusyTagDeviceInfo
+                {
+                    PortName = mapping.port,
+                    Mode = mode.Value,
+                    Vid = mapping.vid,
+                    Pid = mapping.pid
+                });
+
+                mappedPorts.Add(mapping.port);
+
+                // Only add normal-mode devices to the backward-compatible list
+                // (matches Windows behavior — boot devices should not trigger normal connection)
+                if (mode == BusyTagDeviceMode.Normal)
+                    foundDevices.Add(mapping.port);
+            }
+
+            // Boot-mode ESP32-S3 (PID 1001) uses USB JTAG/Serial which may not create
+            // an IOSerialBSDClient in the ioreg tree. If we detect the boot VID/PID but
+            // have no port mapping for it, find unmapped /dev/cu.usbmodem* ports.
             var bootKey = $"{BootModeVid}:{BootModePid}";
-            bool hasNormal = usbDevices.ContainsKey(normalKey);
-            bool hasBoot = usbDevices.ContainsKey(bootKey);
+            bool hasBootVidPid = vidPidsPresent.Contains(bootKey);
+            bool hasBootPortMapping = portMappings.Any(m =>
+                m.vid.Equals(BootModeVid, StringComparison.OrdinalIgnoreCase) &&
+                m.pid.Equals(BootModePid, StringComparison.OrdinalIgnoreCase));
 
-            if (hasNormal || hasBoot)
+            if (hasBootVidPid && !hasBootPortMapping)
             {
-                // Found a device, now find associated serial ports
-                var result = await FindMacOsSerialPortAsync();
+                var allPorts = SerialPort.GetPortNames();
+                var unmappedPorts = allPorts
+                    .Where(p => p.StartsWith("/dev/cu.usbmodem") && !mappedPorts.Contains(p))
+                    .ToList();
 
-                // Populate detailed device list for all found ports
-                var ports = SerialPort.GetPortNames();
-                var usbPorts = ports.Where(p => p.StartsWith("/dev/cu.usbmodem")).ToArray();
-                foreach (var port in usbPorts)
+                foreach (var port in unmappedPorts)
                 {
-                    if (!_busyTagDevicesDetailed.Any(d => d.PortName == port))
+                    detailedDevices.Add(new BusyTagDeviceInfo
                     {
-                        var mode = hasBoot && !hasNormal ? BusyTagDeviceMode.BootLoader : BusyTagDeviceMode.Normal;
-                        _busyTagDevicesDetailed.Add(new BusyTagDeviceInfo
-                        {
-                            PortName = port,
-                            Mode = mode,
-                            Vid = mode == BusyTagDeviceMode.BootLoader ? BootModeVid : NormalModeVid,
-                            Pid = mode == BusyTagDeviceMode.BootLoader ? BootModePid : NormalModePid
-                        });
-                    }
+                        PortName = port,
+                        Mode = BusyTagDeviceMode.BootLoader,
+                        Vid = BootModeVid,
+                        Pid = BootModePid
+                    });
+                    // NOT added to foundDevices — boot devices must not trigger normal connection
                 }
-                FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
+            }
 
-                return result;
-            }
-            else
+            lock (_lockObject)
             {
-                // Device wasn't found, clear the list
-                lock (_lockObject)
-                {
-                    _busyTagSerialDevices = new List<string>();
-                    _busyTagDevicesDetailed = new List<BusyTagDeviceInfo>();
-                    CheckForDeviceChanges();
-                }
-                _isScanningForDevices = false;
-                FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
-                FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
+                _busyTagSerialDevices = foundDevices;
+                _busyTagDevicesDetailed = detailedDevices;
+                CheckForDeviceChanges();
             }
+
+            _isScanningForDevices = false;
+            FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
+            FoundBusyTagDevicesDetailed?.Invoke(this, _busyTagDevicesDetailed);
+            return _busyTagSerialDevices;
         }
         catch (Exception ex)
         {
@@ -551,9 +587,16 @@ public class BusyTagManager : IDisposable
         return null;
     }
 
-    private static async Task<Dictionary<string, string>> GetMacOsUsbDevicesAsync()
+    /// <summary>
+    /// Uses ioreg tree output to:
+    /// 1. Map each USB serial port to its parent USB device's VID/PID
+    /// 2. Collect all BusyTag-related VID:PID pairs present (even without serial ports)
+    /// Boot-mode ESP32-S3 may not have IOSerialBSDClient children, so we need both.
+    /// </summary>
+    private static async Task<(List<(string vid, string pid, string port)> portMappings, HashSet<string> vidPidsPresent)> GetMacOsUsbDeviceInfoAsync()
     {
-        var devices = new Dictionary<string, string>();
+        var portMappings = new List<(string vid, string pid, string port)>();
+        var vidPidsPresent = new HashSet<string>();
 
         try
         {
@@ -562,7 +605,7 @@ public class BusyTagManager : IDisposable
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = "ioreg",
-                    Arguments = "-c IOUSBHostDevice -r",
+                    Arguments = "-r -c IOUSBHostDevice -l -w 0",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     CreateNoWindow = true
@@ -573,23 +616,29 @@ public class BusyTagManager : IDisposable
             var output = await process.StandardOutput.ReadToEndAsync();
             await process.WaitForExitAsync();
 
-            // Parse ioreg output to extract VID:PID pairs
-            var lines = output.Split('\n');
-            var deviceBlocks = new List<Dictionary<string, string>>();
-            var currentDevice = new Dictionary<string, string>();
+            // Parse the ioreg tree to map VID/PID to serial ports.
+            // Each IOUSBHostDevice block contains idVendor/idProduct at its level,
+            // and may contain nested IOSerialBSDClient children with IOCalloutDevice.
+            // When a new IOUSBHostDevice is encountered, VID/PID resets (handles USB hubs).
+            string? currentVid = null;
+            string? currentPid = null;
 
+            var lines = output.Split('\n');
             foreach (var line in lines)
             {
-                // Start of a new device block
+                // New USB device block — reset VID/PID
                 if (line.Contains("class IOUSBHostDevice"))
                 {
-                    if (currentDevice.Count > 0)
+                    // Record VID:PID from previous block before resetting
+                    if (currentVid != null && currentPid != null)
                     {
-                        deviceBlocks.Add(currentDevice);
+                        vidPidsPresent.Add($"{currentVid}:{currentPid}");
                     }
-                    currentDevice = new Dictionary<string, string>();
+                    currentVid = null;
+                    currentPid = null;
                 }
-                else if (line.Contains("\"idVendor\""))
+
+                if (line.Contains("\"idVendor\""))
                 {
                     var parts = line.Split('=');
                     if (parts.Length > 1)
@@ -597,7 +646,7 @@ public class BusyTagManager : IDisposable
                         var vendorIdStr = parts[1].Trim();
                         if (int.TryParse(vendorIdStr, out int vendorId))
                         {
-                            currentDevice["vid"] = vendorId.ToString("X4");
+                            currentVid = vendorId.ToString("X4");
                         }
                     }
                 }
@@ -609,76 +658,42 @@ public class BusyTagManager : IDisposable
                         var productIdStr = parts[1].Trim();
                         if (int.TryParse(productIdStr, out int productId))
                         {
-                            currentDevice["pid"] = productId.ToString("X4");
+                            currentPid = productId.ToString("X4");
+                        }
+                    }
+                }
+                else if (line.Contains("\"IOCalloutDevice\""))
+                {
+                    // Extract serial port path from the IOSerialBSDClient child
+                    var match = System.Text.RegularExpressions.Regex.Match(
+                        line, @"""IOCalloutDevice""\s*=\s*""([^""]+)""");
+                    if (match.Success && currentVid != null && currentPid != null)
+                    {
+                        var port = match.Groups[1].Value;
+                        if (port.StartsWith("/dev/cu.usbmodem"))
+                        {
+                            portMappings.Add((currentVid, currentPid, port));
                         }
                     }
                 }
             }
 
-            // Don't forget the last device
-            if (currentDevice.Count > 0)
+            // Don't forget the last device block
+            if (currentVid != null && currentPid != null)
             {
-                deviceBlocks.Add(currentDevice);
-            }
-
-            // Convert device blocks to VID:PID pairs
-            foreach (var device in deviceBlocks)
-            {
-                if (device.ContainsKey("vid") && device.ContainsKey("pid"))
-                {
-                    var key = $"{device["vid"]}:{device["pid"]}";
-                    devices[key] = key;
-                }
+                vidPidsPresent.Add($"{currentVid}:{currentPid}");
             }
         }
         catch (Exception ex) when (ex.Message.Contains("not supported on this platform"))
         {
-            // Expected on MacCatalyst - process execution is not supported in sandbox
-            // Fall through silently and return empty devices
+            // Expected on MacCatalyst - process execution may not be supported in sandbox
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[DEBUG] Failed to get macOS USB devices: {ex.Message}");
+            Debug.WriteLine($"[DEBUG] Failed to get macOS USB device info: {ex.Message}");
         }
 
-        return devices;
-    }
-
-    private async Task<List<string>?> FindMacOsSerialPortAsync()
-    {
-        var foundDevices = new List<string>();
-
-        try
-        {
-            // Since we've already confirmed the USB device exists via VID/PID,
-            // just return the USB modem ports that match our device pattern
-            var ports = SerialPort.GetPortNames();
-
-            var usbPorts = ports.Where(p =>
-                p.StartsWith("/dev/cu.usbmodem")).ToArray();
-
-            // Add all USB modem ports since we already confirmed the USB device exists
-            // Don't try to communicate with them as they might already be in use
-            foundDevices.AddRange(usbPorts);
-
-            lock (_lockObject)
-            {
-                _busyTagSerialDevices = foundDevices;
-                CheckForDeviceChanges();
-            }
-
-            _isScanningForDevices = false;
-            FoundBusyTagSerialDevices?.Invoke(this, _busyTagSerialDevices);
-            return _busyTagSerialDevices;
-        }
-        catch (Exception ex)
-        {
-            if (EnableVerboseLogging)
-                Debug.WriteLine($"[DEBUG] macOS serial port discovery failed: {ex.Message}");
-            _isScanningForDevices = false;
-        }
-
-        return null;
+        return (portMappings, vidPidsPresent);
     }
 
     #endregion
