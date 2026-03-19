@@ -57,12 +57,14 @@ public class EspToolRunner
 
         // 2. Check PATH
         var pathResult = FindInPath(exeName);
-        if (pathResult != null) return pathResult;
+        if (pathResult != null)
+            return pathResult;
 
         if (!isWindows)
         {
             pathResult = FindInPath("esptool.py");
-            if (pathResult != null) return pathResult;
+            if (pathResult != null)
+                return pathResult;
         }
 
         // 3. ESP-IDF venv paths
