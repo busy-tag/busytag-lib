@@ -29,10 +29,21 @@ echo "Output: $FRAMEWORK_DIR"
 
 # Clean previous build
 rm -rf "$BUILD_DIR"
+rm -rf "$FRAMEWORK_DIR"
 mkdir -p "$BUILD_DIR/catalyst-arm64"
 mkdir -p "$BUILD_DIR/catalyst-x86_64"
-mkdir -p "$FRAMEWORK_DIR/Headers"
-mkdir -p "$FRAMEWORK_DIR/Modules"
+
+# Create versioned framework structure (required for Mac App Store)
+# See: https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPFrameworks/Concepts/FrameworkAnatomy.html
+mkdir -p "$FRAMEWORK_DIR/Versions/A/Headers"
+mkdir -p "$FRAMEWORK_DIR/Versions/A/Modules"
+mkdir -p "$FRAMEWORK_DIR/Versions/A/Resources"
+# Create required symlinks
+ln -sfh A "$FRAMEWORK_DIR/Versions/Current"
+ln -sfh Versions/Current/BusyTagUSBDriver "$FRAMEWORK_DIR/BusyTagUSBDriver"
+ln -sfh Versions/Current/Headers "$FRAMEWORK_DIR/Headers"
+ln -sfh Versions/Current/Modules "$FRAMEWORK_DIR/Modules"
+ln -sfh Versions/Current/Resources "$FRAMEWORK_DIR/Resources"
 
 # Build for arm64 Mac Catalyst
 echo ""
@@ -72,13 +83,13 @@ echo "--- Creating Catalyst universal binary ---"
 lipo -create \
     "$BUILD_DIR/catalyst-arm64/lib${FRAMEWORK_NAME}.dylib" \
     "$BUILD_DIR/catalyst-x86_64/lib${FRAMEWORK_NAME}.dylib" \
-    -output "$FRAMEWORK_DIR/$FRAMEWORK_NAME"
+    -output "$FRAMEWORK_DIR/Versions/A/$FRAMEWORK_NAME"
 
-# Copy headers
-cp "$SCRIPT_DIR/Headers/${FRAMEWORK_NAME}.h" "$FRAMEWORK_DIR/Headers/"
+# Copy headers into versioned directory
+cp "$SCRIPT_DIR/Headers/${FRAMEWORK_NAME}.h" "$FRAMEWORK_DIR/Versions/A/Headers/"
 
-# Create module map
-cat > "$FRAMEWORK_DIR/Modules/module.modulemap" << 'MODULEMAP'
+# Create module map in versioned directory
+cat > "$FRAMEWORK_DIR/Versions/A/Modules/module.modulemap" << 'MODULEMAP'
 framework module BusyTagUSBDriver {
     umbrella header "BusyTagUSBDriver.h"
     export *
@@ -86,17 +97,17 @@ framework module BusyTagUSBDriver {
 }
 MODULEMAP
 
-# Copy Info.plist
-cp "$SCRIPT_DIR/Info.plist" "$FRAMEWORK_DIR/"
+# Copy Info.plist into versioned Resources
+cp "$SCRIPT_DIR/Info.plist" "$FRAMEWORK_DIR/Versions/A/Resources/"
 
 # Sign the framework (ad-hoc for development)
 echo ""
 echo "--- Signing Catalyst framework ---"
-codesign --force --sign - "$FRAMEWORK_DIR/$FRAMEWORK_NAME"
+codesign --force --sign - "$FRAMEWORK_DIR"
 
 echo ""
 echo "=== Catalyst build complete ==="
-file "$FRAMEWORK_DIR/$FRAMEWORK_NAME"
+file "$FRAMEWORK_DIR/Versions/A/$FRAMEWORK_NAME"
 
 # ============================================================
 # Part 2: Plain macOS dylib (for .NET console apps / CLI)
