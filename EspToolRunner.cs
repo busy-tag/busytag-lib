@@ -49,6 +49,18 @@ public class EspToolRunner
 
             var linuxPath = Path.Combine(appDir, "Tools", "linux", "esptool");
             if (File.Exists(linuxPath)) return linuxPath;
+
+            // Mac Catalyst app bundle: AppContext.BaseDirectory may point to Contents/MacOS/
+            // but esptool is in Contents/MonoBundle/Tools/macos/. Walk up and check MonoBundle.
+            var contentsDir = Path.GetDirectoryName(appDir.TrimEnd(Path.DirectorySeparatorChar));
+            if (contentsDir != null)
+            {
+                var monoBundlePath = Path.Combine(contentsDir, "MonoBundle", "Tools", "macos", "esptool");
+                if (File.Exists(monoBundlePath)) return monoBundlePath;
+                // Also check Resources (some bundle layouts)
+                var resourcesPath = Path.Combine(contentsDir, "Resources", "Tools", "macos", "esptool");
+                if (File.Exists(resourcesPath)) return resourcesPath;
+            }
         }
 
         // Fallback: check app root
