@@ -76,6 +76,7 @@ public class BusyTagDevice(string? portName)
     private bool _isPlayingPattern;
     private bool _isWritingToStorage;
     private bool _sendingFile;
+    private bool _uploadFinished;
 
     /// <summary>
     /// Returns true if the device is currently writing to storage (WIS,1 state)
@@ -262,6 +263,48 @@ public class BusyTagDevice(string? portName)
         {
             ConnectionStateChanged?.Invoke(this, false);
             _ctsForConnection.Cancel();
+        }
+    }
+
+    /// <summary>
+    /// Lightweight serial reconnect: closes and reopens the serial port to reset device state.
+    /// Does not fire ConnectionStateChanged or re-initialize the device.
+    /// </summary>
+    private async Task<bool> ReconnectSerialAsync()
+    {
+        try
+        {
+            if (_useIOKit)
+            {
+                _ioKitTransport?.Dispose();
+                _ioKitTransport = null;
+                await Task.Delay(500);
+                _ioKitTransport = new Platforms.MacCatalyst.IOKitUsbTransport();
+                _ioKitTransport.DataReceived += IOKit_DataReceived;
+                _ioKitTransport.ConnectionChanged += IOKit_ConnectionChanged;
+                _ioKitTransport.StartMonitoring();
+                var timeout = DateTime.Now.AddSeconds(3);
+                while (!(_ioKitTransport?.IsConnected ?? false) && DateTime.Now < timeout)
+                    await Task.Delay(100);
+                ClearBuffer();
+                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] IOKit reconnect: IsConnected={IsConnected}");
+                return IsConnected;
+            }
+
+            if (_serialPort == null) return false;
+            var portName = _serialPort.PortName;
+            _serialPort.Close();
+            await Task.Delay(500);
+            _serialPort.PortName = portName;
+            _serialPort.Open();
+            ClearBuffer();
+            Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] Serial reconnect: IsConnected={IsConnected}");
+            return IsConnected;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] Reconnect failed: {ex.Message}");
+            return false;
         }
     }
 
@@ -834,8 +877,15 @@ public class BusyTagDevice(string? portName)
                     if (_sendingFile)
                     {
                         var errorMessage = line.Contains(":") ? line.Split(':').Last().Trim() : "Unknown device error";
-                        CancelFileUpload(false, UploadErrorType.DeviceError, 
+                        CancelFileUpload(false, UploadErrorType.DeviceError,
                             $"Device reported error: {errorMessage}");
+                    }
+                    else
+                    {
+                        // Device sent ERROR while not uploading (e.g. delayed timeout from previous operation).
+                        // Clear buffer to prevent stale data from affecting next commands.
+                        Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][Device] Unexpected ERROR while idle: {line}");
+                        ClearBuffer();
                     }
                 }
             }
@@ -1316,6 +1366,7 @@ public class BusyTagDevice(string? portName)
             File.Copy(sourcePath, destFilePath, true);
         CleanupCacheIfNeeded();
         _sendingFile = true;
+        _uploadFinished = false;
         _currentUploadFileName = fileName;
 
         var args = new UploadProgressArgs
@@ -1326,7 +1377,7 @@ public class BusyTagDevice(string? portName)
         FileUploadProgress?.Invoke(this, args);
         if (fileName.Length > MaxFilenameLength)
         {
-            CancelFileUpload(false, UploadErrorType.FilenameToolong, 
+            CancelFileUpload(false, UploadErrorType.FilenameToolong,
                 $"Filename '{fileName}' exceeds maximum length of {MaxFilenameLength} characters");
             return;
         }
@@ -1475,13 +1526,31 @@ public class BusyTagDevice(string? portName)
             var lastProgressUpdate = DateTime.Now;
             const int progressUpdateIntervalMs = 100; // Throttle progress updates to every 100ms
 
-            // Longer timeout to allow device storage cleanup before upload
-            var response = await SendCommandAsync($"AT+UF={fileName},{fileSize}", 2000);
+            // Use actual data length (not fileSize from FileInfo) to prevent mismatch
+            // if the file was modified between FileInfo read and ReadAllBytes
+            var response = await SendCommandAsync($"AT+UF={fileName},{data.Length}", 2000);
             if (!response.Contains(">"))
             {
-                CancelFileUpload(false, UploadErrorType.DeviceError, 
-                    "Device did not respond properly to upload command");
-                return false;
+                // Device may be in error state from a previous operation (e.g. ERROR:0 timeout).
+                // Reconnect the serial port to reset device state, then retry once.
+                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] AT+UF no '>' response, reconnecting serial and retrying");
+                _sendingFile = false; // Temporarily clear so FilterResponse won't cancel
+
+                if (!await ReconnectSerialAsync())
+                {
+                    CancelFileUpload(false, UploadErrorType.DeviceError,
+                        "Device did not respond properly to upload command and reconnect failed");
+                    return false;
+                }
+
+                _sendingFile = true;
+                response = await SendCommandAsync($"AT+UF={fileName},{data.Length}", 2000);
+                if (!response.Contains(">"))
+                {
+                    CancelFileUpload(false, UploadErrorType.DeviceError,
+                        "Device did not respond properly to upload command after reconnect");
+                    return false;
+                }
             }
 
             _writeRawData = true;
@@ -1587,9 +1656,17 @@ public class BusyTagDevice(string? portName)
         }
     }
 
-    public void CancelFileUpload(bool successfullyFileUpload = true, UploadErrorType errorType = UploadErrorType.None, 
+    public void CancelFileUpload(bool successfullyFileUpload = true, UploadErrorType errorType = UploadErrorType.None,
         string? errorMessage = null)
     {
+        // Guard against double invocation for the same upload
+        if (_uploadFinished)
+        {
+            Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] CancelFileUpload ignored - upload already finished");
+            return;
+        }
+        _uploadFinished = true;
+
         _ctsForFileSending.Cancel();
         var args = new FileUploadFinishedArgs
         {
@@ -1598,9 +1675,9 @@ public class BusyTagDevice(string? portName)
             ErrorType = errorType,
             ErrorMessage = errorMessage
         };
-        _sendingFile =  false;
+        _sendingFile = false;
         FileUploadFinished?.Invoke(this, args);
-        
+
         // Reset upload state
         _currentUploadFileName = string.Empty;
     }
