@@ -43,22 +43,23 @@ public class EspToolRunner
         }
         else
         {
-            // On non-Windows (macOS, Mac Catalyst, Linux): check macOS first, then Linux
-            var macPath = Path.Combine(appDir, "Tools", "macos", "esptool");
+            // On non-Windows (macOS, Mac Catalyst, Linux): check macOS first, then Linux.
+            // macOS esptool is a PyInstaller --onedir bundle: Tools/macos/esptool/esptool
+            // (directory name + inner executable). Linux is still a single-file binary.
+            var macPath = Path.Combine(appDir, "Tools", "macos", "esptool", "esptool");
             if (File.Exists(macPath)) return macPath;
 
             var linuxPath = Path.Combine(appDir, "Tools", "linux", "esptool");
             if (File.Exists(linuxPath)) return linuxPath;
 
             // Mac Catalyst app bundle: AppContext.BaseDirectory may point to Contents/MacOS/
-            // but esptool is in Contents/MonoBundle/Tools/macos/. Walk up and check MonoBundle.
+            // but esptool is in Contents/MonoBundle/Tools/macos/esptool/. Walk up and check.
             var contentsDir = Path.GetDirectoryName(appDir.TrimEnd(Path.DirectorySeparatorChar));
             if (contentsDir != null)
             {
-                var monoBundlePath = Path.Combine(contentsDir, "MonoBundle", "Tools", "macos", "esptool");
+                var monoBundlePath = Path.Combine(contentsDir, "MonoBundle", "Tools", "macos", "esptool", "esptool");
                 if (File.Exists(monoBundlePath)) return monoBundlePath;
-                // Also check Resources (some bundle layouts)
-                var resourcesPath = Path.Combine(contentsDir, "Resources", "Tools", "macos", "esptool");
+                var resourcesPath = Path.Combine(contentsDir, "Resources", "Tools", "macos", "esptool", "esptool");
                 if (File.Exists(resourcesPath)) return resourcesPath;
             }
         }

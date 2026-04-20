@@ -67,21 +67,40 @@
     </ItemGroup>
 
     <!-- Bundled esptool standalone executables for firmware recovery -->
-    <!-- Copy to output for direct project references -->
+    <!-- Copy to output for direct project references. macOS esptool is a
+         PyInstaller onedir bundle (directory tree) handled in a dedicated
+         target below because <Content> + CopyToOutputDirectory on a deeply
+         nested glob hits parallel-copy races creating parent directories. -->
     <ItemGroup Condition="!$(TargetFramework.Contains('android')) AND !$(TargetFramework.Contains('ios'))">
         <Content Include="Tools\win\esptool.exe" CopyToOutputDirectory="PreserveNewest" />
-        <Content Include="Tools\macos\esptool" CopyToOutputDirectory="PreserveNewest">
-            <PublishFolderType>Assembly</PublishFolderType>
-        </Content>
         <Content Include="Tools\linux\esptool" CopyToOutputDirectory="PreserveNewest">
             <PublishFolderType>Assembly</PublishFolderType>
         </Content>
     </ItemGroup>
 
+    <!-- macOS esptool onedir bundle: copy with explicit MakeDir to avoid races. -->
+    <ItemGroup Condition="!$(TargetFramework.Contains('android')) AND !$(TargetFramework.Contains('ios'))">
+        <_EsptoolMacosBundleFiles Include="Tools\macos\esptool\**\*" />
+    </ItemGroup>
+    <Target Name="_CopyEsptoolMacosBundleToOutput"
+            Condition="!$(TargetFramework.Contains('android')) AND !$(TargetFramework.Contains('ios'))"
+            AfterTargets="CopyFilesToOutputDirectory"
+            Inputs="@(_EsptoolMacosBundleFiles)"
+            Outputs="@(_EsptoolMacosBundleFiles->'$(OutputPath)Tools\macos\esptool\%(RecursiveDir)%(Filename)%(Extension)')">
+        <ItemGroup>
+            <_EsptoolMacosBundleDirs Include="@(_EsptoolMacosBundleFiles->'$(OutputPath)Tools\macos\esptool\%(RecursiveDir)')" />
+        </ItemGroup>
+        <MakeDir Directories="@(_EsptoolMacosBundleDirs->Distinct())" />
+        <Copy SourceFiles="@(_EsptoolMacosBundleFiles)"
+              DestinationFiles="@(_EsptoolMacosBundleFiles->'$(OutputPath)Tools\macos\esptool\%(RecursiveDir)%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true"
+              UseHardlinksIfPossible="true" />
+    </Target>
+
     <!-- Pack esptool binaries and .targets file into the NuGet package for package consumers -->
     <ItemGroup>
         <None Include="Tools\win\esptool.exe" Pack="true" PackagePath="tools\win\" />
-        <None Include="Tools\macos\esptool" Pack="true" PackagePath="tools\macos\" />
+        <None Include="Tools\macos\esptool\**\*" Pack="true" PackagePath="tools\macos\esptool\%(RecursiveDir)%(Filename)%(Extension)" />
         <None Include="Tools\linux\esptool" Pack="true" PackagePath="tools\linux\" />
         <None Include="build\BusyTag.Lib.targets" Pack="true" PackagePath="build\" />
         <None Include="build\BusyTag.Lib.targets" Pack="true" PackagePath="buildTransitive\BusyTag.Lib.targets" />
