@@ -4,4 +4,5 @@ public class UploadProgressArgs: EventArgs
 {
     public string FileName { get; set; } = string.Empty;
     public float ProgressLevel  { get; set; }
+    public float SpeedBytesPerSecond { get; set; }
 }

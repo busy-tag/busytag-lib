@@ -38,6 +38,7 @@ public class BusyTagDevice(string? portName)
 
     private Platforms.MacCatalyst.IOKitUsbTransport? _ioKitTransport;
     private bool _useIOKit;
+    public bool IsSandboxed { get; set; } = false;
 
     // Centralized data buffer - all serial data flows through sp_DataReceived
     private readonly ConcurrentQueue<byte> _dataBuffer = new();
@@ -216,8 +217,13 @@ public class BusyTagDevice(string? portName)
 
         if (FirmwareVersionFloat < 2.0)
         {
-            await SetUsbMassStorageActiveAsync(true);
-            _busyTagDrive = FindBusyTagDrive();
+            // USB mass storage is inaccessible in the sandboxed (App Store) build;
+            // all file operations go through AT commands via IOKit instead.
+            if (!(IsSandboxed && _useIOKit))
+            {
+                await SetUsbMassStorageActiveAsync(true);
+                _busyTagDrive = FindBusyTagDrive();
+            }
             await SetShowAfterDropAsync(false);
         }
         if (FirmwareVersionFloat > 0.7 && FirmwareVersionFloat < 2.0)
@@ -575,8 +581,8 @@ public class BusyTagDevice(string? portName)
 
                 var data = Encoding.UTF8.GetString(buf, 0, len);
                 // Debug.WriteLine($"[RX {_asyncCommandActive}] {data}");
-                // If not in command mode, filter and process async events
-                if (!_asyncCommandActive|| data.StartsWith("+evn:"))
+                // If not in command mode and not writing raw data, filter and process async events
+                if (!_writeRawData && (!_asyncCommandActive || data.StartsWith("+evn:")))
                 {
                     FilterResponse(data);
                 }
@@ -613,8 +619,8 @@ public class BusyTagDevice(string? portName)
             _dataAvailableSemaphore.Release(data.Length);
 
             var text = Encoding.UTF8.GetString(data);
-            // If not in command mode, filter and process async events
-            if (!_asyncCommandActive || text.StartsWith("+evn:"))
+            // If not in command mode and not writing raw data, filter and process async events
+            if (!_writeRawData && (!_asyncCommandActive || text.StartsWith("+evn:")))
             {
                 FilterResponse(text);
             }
@@ -943,7 +949,7 @@ public class BusyTagDevice(string? portName)
 
     public async Task<long> GetFreeStorageSizeAsync()
     {
-        if (FirmwareVersionFloat >= 2.0)
+        if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit))
         {
             // ReSharper disable once StringLiteralTypo
             var response = await SendCommandAsync("AT+GFSS",200);
@@ -970,7 +976,7 @@ public class BusyTagDevice(string? portName)
 
     public async Task<long> GetTotalStorageSizeAsync()
     {
-        if (FirmwareVersionFloat >= 2.0)
+        if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit))
         {
             // ReSharper disable once StringLiteralTypo
             var response = await SendCommandAsync("AT+GTSS");
@@ -993,7 +999,7 @@ public class BusyTagDevice(string? portName)
     public async Task<List<FileStruct>> GetFileListAsync()
     {
         FileList = new List<FileStruct>();
-        if (FirmwareVersionFloat >= 2.0)
+        if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit))
         {
             var response = await SendCommandAsync("AT+GFL", 500, false);
             FileList = ParseFileList(response, "+FL:");
@@ -1077,7 +1083,24 @@ public class BusyTagDevice(string? portName)
 
     public async Task<bool> ShowPictureAsync(string fileName)
     {
-        var response = await SendCommandAsync($"AT+SP={fileName}", 300);
+        FileLogger.Log($"[ShowPictureAsync] fileName={fileName} isWritingToStorage={_isWritingToStorage} fw={FirmwareVersionFloat} useIOKit={_useIOKit}");
+        // On IOKit + fw >= 2.0 the device writes to flash after the upload OK and sends
+        // real WIS,1 / WIS,0 events. Sending AT+SP= while WIS=1 causes a timeout.
+        // Wait up to 10 seconds for any active storage write to finish before proceeding.
+        if (_isWritingToStorage)
+        {
+            FileLogger.Log("[ShowPictureAsync] waiting for WIS,0...");
+            var deadline = DateTime.Now.AddSeconds(10);
+            while (_isWritingToStorage && DateTime.Now < deadline)
+                await Task.Delay(50);
+            FileLogger.Log($"[ShowPictureAsync] WIS wait done, isWritingToStorage={_isWritingToStorage}");
+        }
+
+        // fw 1.0 via IOKit needs extra time to read the file from flash and display it.
+        var spTimeoutMs = (_useIOKit && FirmwareVersionFloat < 2.0) ? 3000 : 300;
+        FileLogger.Log($"[ShowPictureAsync] sending AT+SP={fileName} timeout={spTimeoutMs}ms");
+        var response = await SendCommandAsync($"AT+SP={fileName}", spTimeoutMs);
+        FileLogger.Log($"[ShowPictureAsync] AT+SP response='{response.Trim()}'");
         if (response.Contains("+evn:SP,"))
         {
             CurrentImageName = fileName;
@@ -1192,8 +1215,10 @@ public class BusyTagDevice(string? portName)
             return false;
         }
 
+        FileLogger.Log("[ActivateFileStorageScanAsync] sending AT+AFSS");
         // ReSharper disable once StringLiteralTypo
-        var response = await SendCommandAsync("AT+AFSS", 200);
+        var response = await SendCommandAsync("AT+AFSS", 2000);
+        FileLogger.Log($"[ActivateFileStorageScanAsync] response='{response.Trim()}'");
         return response.Contains("OK");
     }
 
@@ -1343,13 +1368,20 @@ public class BusyTagDevice(string? portName)
             var path = Path.Combine(d.Name, "readme.txt");
             if (!File.Exists(path)) continue;
 
-            // Open the file to read from.
-            using var sr = File.OpenText(path);
-            while (sr.ReadLine() is { } s)
+            // Open the file to read from. On sandboxed macOS (App Store), accessing
+            // external volumes via the filesystem is blocked even if the file is visible
+            // via stat() — catch I/O and permission errors and skip the drive.
+            try
             {
-                if (!s.Contains(LocalHostAddress)) continue;
-                return d;
+                using var sr = File.OpenText(path);
+                while (sr.ReadLine() is { } s)
+                {
+                    if (!s.Contains(LocalHostAddress)) continue;
+                    return d;
+                }
             }
+            catch (UnauthorizedAccessException) { }
+            catch (IOException) { }
         }
 
         return null;
@@ -1383,26 +1415,42 @@ public class BusyTagDevice(string? portName)
         }
 
         _ctsForFileSending = new CancellationTokenSource();
-        if (FirmwareVersionFloat >= 2.0)
+        FileLogger.Log($"[SendNewFile] file={fileName} fw={FirmwareVersionFloat} useIOKit={_useIOKit} IsSandboxed={IsSandboxed}");
+        if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit))
         {
+            FileLogger.Log($"[SendNewFile] → serial path");
             await Task.Run(async () =>
             {
                 try
                 {
                     var success = await SendFileViaSerial(sourcePath);
                     _sendingFile = false;
-                    
+                    FileLogger.Log($"[SendNewFile] SendFileViaSerial returned success={success}");
+
                     if (success)
                     {
                         FileList.Add(new FileStruct(fileName, new FileInfo(sourcePath).Length));
-                        CancelFileUpload(true); // Success
+                        CancelFileUpload(true); // Success — fires FileUploadFinished
+                        // Firmware 1.0 doesn't send +evn:WIS events after AT+UF via IOKit.
+                        // Synthesize WritingInStorage=false so the UI knows to call AT+SP=.
+                        // Delay 500 ms first so the device finishes any internal flash housekeeping
+                        // and is ready to service AT+SP= by the time the event reaches the UI.
+                        if (_useIOKit && FirmwareVersionFloat < 2.0)
+                        {
+                            FileLogger.Log("[SendNewFile] fw<2.0 IOKit: waiting 500ms then synthesising WIS,0");
+                            await Task.Delay(500);
+                            _isWritingToStorage = false;
+                            WritingInStorage?.Invoke(this, false);
+                            FileLogger.Log("[SendNewFile] WIS,0 synthesised and fired");
+                        }
                     }
                     // Error handling is done within SendFileViaSerial
                 }
                 catch (Exception ex)
                 {
                     _sendingFile = false;
-                    CancelFileUpload(false, UploadErrorType.Unknown, 
+                    FileLogger.Log($"[SendNewFile] EXCEPTION: {ex.Message}");
+                    CancelFileUpload(false, UploadErrorType.Unknown,
                         $"Unexpected error during file upload: {ex.Message}");
                 }
             });
@@ -1443,6 +1491,7 @@ public class BusyTagDevice(string? portName)
 
                 var buffer = new byte[_useIOKit ? 8192 * 32 : 8192];
                 int readByte;
+                var uploadStartTime = DateTime.Now;
 
                 while ((readByte = fsIn.Read(buffer, 0, buffer.Length)) > 0 &&
                        !_ctsForFileSending.Token.IsCancellationRequested)
@@ -1451,6 +1500,8 @@ public class BusyTagDevice(string? portName)
                     {
                         fsOut.Write(buffer, 0, readByte);
                         args.ProgressLevel = (float)(fsIn.Position * 100.0 / fsIn.Length);
+                        var elapsedSeconds = (DateTime.Now - uploadStartTime).TotalSeconds;
+                        args.SpeedBytesPerSecond = elapsedSeconds > 0 ? (float)(fsIn.Position / elapsedSeconds) : 0;
                         FileUploadProgress?.Invoke(this, args);
                     }
                     catch (Exception ex)
@@ -1487,6 +1538,7 @@ public class BusyTagDevice(string? portName)
     private async Task<bool> SendFileViaSerial(string sourcePath)
     {
         var fileName = Path.GetFileName(sourcePath);
+        FileLogger.Log($"[SendFileViaSerial] START file={fileName} fw={FirmwareVersionFloat} IsSandboxed={IsSandboxed} useIOKit={_useIOKit}");
         var args = new UploadProgressArgs
         {
             FileName = fileName,
@@ -1521,23 +1573,29 @@ public class BusyTagDevice(string? portName)
             }
 
             var data = await File.ReadAllBytesAsync(sourcePath);
-            const int chunkSize = 1024 * 32; // Increased from 8KB to 32KB for better throughput
+            // Sandboxed + fw < 2.0: USB CDC buffer is 64 bytes, use 128-byte chunks to avoid overflow
+            var chunkSize = (IsSandboxed && FirmwareVersionFloat < 2.0f) ? 128 : 1024 * 32;
+            FileLogger.Log($"[SendFileViaSerial] dataLen={data.Length} chunkSize={chunkSize}");
             var totalBytesTransferred = 0f;
             var lastProgressUpdate = DateTime.Now;
             const int progressUpdateIntervalMs = 100; // Throttle progress updates to every 100ms
 
             // Use actual data length (not fileSize from FileInfo) to prevent mismatch
             // if the file was modified between FileInfo read and ReadAllBytes
+            FileLogger.Log($"[SendFileViaSerial] sending AT+UF={fileName},{data.Length}");
             var response = await SendCommandAsync($"AT+UF={fileName},{data.Length}", 2000);
+            FileLogger.Log($"[SendFileViaSerial] AT+UF response='{response.Trim()}'");
             if (!response.Contains(">"))
             {
                 // Device may be in error state from a previous operation (e.g. ERROR:0 timeout).
                 // Reconnect the serial port to reset device state, then retry once.
                 Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] AT+UF no '>' response, reconnecting serial and retrying");
+                FileLogger.Log("[SendFileViaSerial] no '>' — reconnecting and retrying");
                 _sendingFile = false; // Temporarily clear so FilterResponse won't cancel
 
                 if (!await ReconnectSerialAsync())
                 {
+                    FileLogger.Log("[SendFileViaSerial] reconnect FAILED");
                     CancelFileUpload(false, UploadErrorType.DeviceError,
                         "Device did not respond properly to upload command and reconnect failed");
                     return false;
@@ -1545,14 +1603,17 @@ public class BusyTagDevice(string? portName)
 
                 _sendingFile = true;
                 response = await SendCommandAsync($"AT+UF={fileName},{data.Length}", 2000);
+                FileLogger.Log($"[SendFileViaSerial] AT+UF retry response='{response.Trim()}'");
                 if (!response.Contains(">"))
                 {
+                    FileLogger.Log("[SendFileViaSerial] AT+UF still no '>' after reconnect — aborting");
                     CancelFileUpload(false, UploadErrorType.DeviceError,
                         "Device did not respond properly to upload command after reconnect");
                     return false;
                 }
             }
 
+            var uploadStartTime = DateTime.Now;
             _writeRawData = true;
             for (var i = 0; i < data.Length; i += chunkSize)
             {
@@ -1587,8 +1648,13 @@ public class BusyTagDevice(string? portName)
                     var now = DateTime.Now;
                     if ((now - lastProgressUpdate).TotalMilliseconds >= progressUpdateIntervalMs)
                     {
-                        var progressLevel = (float)((double)totalBytesTransferred / data.Length * 100.0);
+                        // Cap at 99.9 % here — the explicit 100 % event fires only after the
+                        // device confirms OK.  This prevents AT+AFSS from being triggered while
+                        // _writeRawData is still true (which would silently fail the command).
+                        var progressLevel = Math.Min(99.9f, (float)((double)totalBytesTransferred / data.Length * 100.0));
                         args.ProgressLevel = progressLevel;
+                        var elapsedSeconds = (now - uploadStartTime).TotalSeconds;
+                        args.SpeedBytesPerSecond = elapsedSeconds > 0 ? (float)(totalBytesTransferred / elapsedSeconds) : 0;
                         FileUploadProgress?.Invoke(this, args);
                         lastProgressUpdate = now;
                     }
@@ -1616,33 +1682,47 @@ public class BusyTagDevice(string? portName)
                 }
             }
 
-            // Final progress update
-            args.ProgressLevel = 100.0f;
-            FileUploadProgress?.Invoke(this, args);
-
             // Wait for device OK response.
-            // For small files, all data is already flushed through USB and OK arrives directly.
-            response = await WaitForResponseAsync(2000);
+            // fw 1.0 via IOKit: flash erase + write time scales with file size.
+            // Observed ~100 ms/KB for flash write on fw 1.0. Add a 10 s base buffer.
+            // fw 2.0 responds quickly after data transfer.
+            var okTimeoutMs = (IsSandboxed && FirmwareVersionFloat < 2.0f)
+                ? Math.Max(30000, 10000 + (int)(data.Length / 1024.0 * 100))
+                : 2000;
+            FileLogger.Log($"[SendFileViaSerial] data sent, waiting for OK (timeout={okTimeoutMs}ms)");
+            response = await WaitForResponseAsync(okTimeoutMs);
+            FileLogger.Log($"[SendFileViaSerial] OK-wait response='{response.Trim()}'");
 
             // If no response, the USB CDC driver may be holding the last bytes.
             // Send padding to force the driver to flush, then wait again.
             if (string.IsNullOrEmpty(response))
             {
                 Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] No response after upload, sending flush padding");
+                FileLogger.Log("[SendFileViaSerial] empty response — sending flush padding");
                 if (_useIOKit)
                     _ioKitTransport?.SendLine("");
                 else
                     _serialPort?.WriteLine("");
 
                 response = await WaitForResponseAsync(3000);
+                FileLogger.Log($"[SendFileViaSerial] flush-padding response='{response.Trim()}'");
             }
 
             if (response.Contains("OK"))
             {
+                FileLogger.Log("[SendFileViaSerial] got OK → success");
+                // Fire 100% only after device confirms OK — this prevents BusyTagOnFileUploadProgress
+                // from calling CleanupDevice→SendCommandAsync which would clear the buffer and
+                // race with the WaitForResponseAsync that is still waiting above.
+                args.ProgressLevel = 100.0f;
+                var totalElapsed = (DateTime.Now - uploadStartTime).TotalSeconds;
+                args.SpeedBytesPerSecond = totalElapsed > 0 ? (float)(data.Length / totalElapsed) : 0;
+                FileUploadProgress?.Invoke(this, args);
                 return true; // Success - CancelFileUpload will be called with success=true
             }
             else
             {
+                FileLogger.Log($"[SendFileViaSerial] no OK in response — upload failed");
                 CancelFileUpload(false, UploadErrorType.DeviceError,
                     "Device did not confirm successful upload");
                 return false;
@@ -1659,6 +1739,7 @@ public class BusyTagDevice(string? portName)
     public void CancelFileUpload(bool successfullyFileUpload = true, UploadErrorType errorType = UploadErrorType.None,
         string? errorMessage = null)
     {
+        FileLogger.Log($"[CancelFileUpload] success={successfullyFileUpload} error={errorType} msg={errorMessage}");
         // Guard against double invocation for the same upload
         if (_uploadFinished)
         {
@@ -1704,31 +1785,64 @@ public class BusyTagDevice(string? portName)
 
     private async Task<bool> AutoDeleteFile()
     {
+        FileLogger.Log($"[AutoDeleteFile] FileList.Count={FileList.Count} CurrentImageName='{CurrentImageName}'");
+        foreach (var item in FileList)
+            FileLogger.Log($"[AutoDeleteFile]   - {item.Name} ({item.Size} bytes)");
+
+        // First pass: delete any non-current file
         foreach (var item in FileList)
         {
             if (CurrentImageName == item.Name) continue;
-            if (FirmwareVersionFloat >= 2.0 ||
+            if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit) ||
                 item.Name.EndsWith("png") || item.Name.EndsWith("jpg") || item.Name.EndsWith("gif"))
             {
-                if (await DeleteFile(item.Name)) return true;
-                // Delete failed, skip to next file
+                FileLogger.Log($"[AutoDeleteFile] deleting '{item.Name}'");
+                if (await DeleteFile(item.Name))
+                {
+                    FileList.Remove(item);
+                    return true;
+                }
                 Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] AutoDeleteFile: Failed to delete {item.Name}, trying next file");
             }
         }
 
+        // Second pass: also allow deleting the current image — we're about to replace it anyway
+        foreach (var item in FileList)
+        {
+            if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit) ||
+                item.Name.EndsWith("png") || item.Name.EndsWith("jpg") || item.Name.EndsWith("gif"))
+            {
+                FileLogger.Log($"[AutoDeleteFile] fallback: deleting current image '{item.Name}'");
+                if (await DeleteFile(item.Name))
+                {
+                    FileList.Remove(item);
+                    return true;
+                }
+            }
+        }
+
+        FileLogger.Log("[AutoDeleteFile] nothing to delete, returning false");
         return false;
     }
 
     public async Task<bool> FreeUpStorage(long size)
     {
-        if (FirmwareVersionFloat >= 2.0)
+        FileLogger.Log($"[FreeUpStorage] needed={size} FreeStorageSize={FreeStorageSize} fw={FirmwareVersionFloat}");
+        if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit))
         {
             var counter = 0;
             await GetFreeStorageSizeAsync();
+            FileLogger.Log($"[FreeUpStorage] after refresh: FreeStorageSize={FreeStorageSize}");
             while (FreeStorageSize < size)
             {
-                if (await AutoDeleteFile() != true) return false;
+                FileLogger.Log($"[FreeUpStorage] not enough space, calling AutoDeleteFile (pass {counter + 1})");
+                if (await AutoDeleteFile() != true)
+                {
+                    FileLogger.Log("[FreeUpStorage] AutoDeleteFile failed — giving up");
+                    return false;
+                }
                 await GetFreeStorageSizeAsync();
+                FileLogger.Log($"[FreeUpStorage] after delete: FreeStorageSize={FreeStorageSize}");
                 counter++;
                 if (counter < 20) continue;
                 return false;
@@ -1755,10 +1869,10 @@ public class BusyTagDevice(string? portName)
 
     public async Task<bool> DeleteFile(string fileName)
     {
-        if (FirmwareVersionFloat >= 2.0)
+        if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit))
         {
             var response = await SendCommandAsync($"AT+DF={fileName}", 300);
-            if (!response.Contains("OK"))
+            if (!response.Contains("OK") && !response.Contains("+DF:"))
             {
                 Debug.WriteLine($"Error deleting file: {fileName}");
                 return false;

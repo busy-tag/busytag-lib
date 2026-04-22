@@ -44,22 +44,20 @@ public class EspToolRunner
         else
         {
             // On non-Windows (macOS, Mac Catalyst, Linux): check macOS first, then Linux.
-            // macOS esptool is a PyInstaller --onedir bundle: Tools/macos/esptool/esptool
-            // (directory name + inner executable). Linux is still a single-file binary.
-            var macPath = Path.Combine(appDir, "Tools", "macos", "esptool", "esptool");
+            var macPath = Path.Combine(appDir, "Tools", "macos", "esptool");
             if (File.Exists(macPath)) return macPath;
 
             var linuxPath = Path.Combine(appDir, "Tools", "linux", "esptool");
             if (File.Exists(linuxPath)) return linuxPath;
 
-            // Mac Catalyst app bundle: AppContext.BaseDirectory may point to Contents/MacOS/
-            // but esptool is in Contents/MonoBundle/Tools/macos/esptool/. Walk up and check.
+            // Mac Catalyst app bundle: AppContext.BaseDirectory points to Contents/MonoBundle.
+            // Walk up to Contents/ and check the standard Tools path.
             var contentsDir = Path.GetDirectoryName(appDir.TrimEnd(Path.DirectorySeparatorChar));
             if (contentsDir != null)
             {
-                var monoBundlePath = Path.Combine(contentsDir, "MonoBundle", "Tools", "macos", "esptool", "esptool");
+                var monoBundlePath = Path.Combine(contentsDir, "MonoBundle", "Tools", "macos", "esptool");
                 if (File.Exists(monoBundlePath)) return monoBundlePath;
-                var resourcesPath = Path.Combine(contentsDir, "Resources", "Tools", "macos", "esptool", "esptool");
+                var resourcesPath = Path.Combine(contentsDir, "Resources", "Tools", "macos", "esptool");
                 if (File.Exists(resourcesPath)) return resourcesPath;
             }
         }
@@ -80,7 +78,39 @@ public class EspToolRunner
                 return pathResult;
         }
 
-        // 3. ESP-IDF venv paths
+        // 3. Known macOS install locations — checked explicitly because the
+        //    App Store sandbox strips PATH to system dirs only, so FindInPath
+        //    misses Homebrew (/opt/homebrew/bin) and pip-user installs.
+        //    The sandbox also remaps HOME to the container, so we derive the
+        //    real user home from Environment.UserName (/Users/<name>) instead.
+        if (!isWindows)
+        {
+            foreach (var p in new[] { "/opt/homebrew/bin/esptool", "/usr/local/bin/esptool" })
+                if (File.Exists(p)) return p;
+
+            // Real macOS home — not the sandboxed container home
+            var realHome = Path.Combine("/Users", Environment.UserName);
+
+            // pip --user: ~/Library/Python/3.x/bin/esptool
+            var libPython = Path.Combine(realHome, "Library", "Python");
+            if (Directory.Exists(libPython))
+            {
+                foreach (var ver in Directory.GetDirectories(libPython).OrderByDescending(d => d))
+                {
+                    foreach (var name in new[] { "esptool", "esptool.py" })
+                    {
+                        var p = Path.Combine(ver, "bin", name);
+                        if (File.Exists(p)) return p;
+                    }
+                }
+            }
+
+            // ~/.local/bin/esptool
+            var localBin = Path.Combine(realHome, ".local", "bin", "esptool");
+            if (File.Exists(localBin)) return localBin;
+        }
+
+        // 5. ESP-IDF venv paths
         var espressifDir = GetEspressifDir();
         if (espressifDir != null && Directory.Exists(espressifDir))
         {
@@ -108,7 +138,9 @@ public class EspToolRunner
 
     private static string? GetEspressifDir()
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var home = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : Path.Combine("/Users", Environment.UserName);
         var espDir = Path.Combine(home, ".espressif");
         return Directory.Exists(espDir) ? espDir : null;
     }
@@ -124,6 +156,135 @@ public class EspToolRunner
             if (File.Exists(fullPath))
                 return fullPath;
         }
+        return null;
+    }
+
+    /// <summary>
+    /// Tries to install esptool via pip3/pip (or python3 -m pip) and returns
+    /// its path if the install succeeded. Also checks common user pip locations
+    /// (e.g. ~/Library/Python/3.x/bin) that may not be on PATH.
+    /// </summary>
+    public static async Task<string?> InstallEsptoolAsync(CancellationToken ct = default)
+    {
+        bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+        // Build priority list: pip first, then Homebrew (macOS), then python -m pip
+        var candidates = new List<(string exe, string args)>();
+
+        if (!isWindows)
+        {
+            // Fixed macOS paths checked first — the sandbox strips PATH so FindInPath
+            // won't see Homebrew or user-installed binaries.
+            foreach (var pip in new[] {
+                "/opt/homebrew/bin/pip3", "/usr/local/bin/pip3", "/usr/bin/pip3" })
+            {
+                if (File.Exists(pip)) candidates.Add((pip, "install esptool"));
+            }
+        }
+
+        foreach (var pip in new[] { "pip3", "pip" })
+        {
+            var p = FindInPath(pip);
+            if (p != null) candidates.Add((p, "install esptool"));
+        }
+
+        if (!isWindows)
+        {
+            // Homebrew — works even without Python installed.
+            foreach (var brew in new[] { "/opt/homebrew/bin/brew", "/usr/local/bin/brew" })
+            {
+                if (File.Exists(brew)) { candidates.Add((brew, "install esptool")); break; }
+            }
+            var brewInPath = FindInPath("brew");
+            if (brewInPath != null) candidates.Add((brewInPath, "install esptool"));
+
+            // Fixed paths for python3 as fallback
+            foreach (var py in new[] {
+                "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3" })
+            {
+                if (File.Exists(py)) candidates.Add((py, "-m pip install esptool"));
+            }
+        }
+
+        foreach (var py in new[] { "python3", "python" })
+        {
+            var p = FindInPath(py);
+            if (p != null) candidates.Add((p, "-m pip install esptool"));
+        }
+
+        foreach (var (exe, args) in candidates)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = exe,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc == null) continue;
+                await proc.WaitForExitAsync(ct);
+                if (proc.ExitCode != 0) continue;
+
+                return FindEsptool() ?? FindEsptoolInKnownPaths(isWindows);
+            }
+            catch { /* try next candidate */ }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Checks pip/brew user install locations that may not be on the app's PATH.
+    /// </summary>
+    private static string? FindEsptoolInKnownPaths(bool isWindows)
+    {
+        var home = isWindows
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : Path.Combine("/Users", Environment.UserName);
+
+        if (isWindows)
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var scriptsRoot = Path.Combine(appData, "Python");
+            if (Directory.Exists(scriptsRoot))
+            {
+                foreach (var dir in Directory.GetDirectories(scriptsRoot).OrderByDescending(d => d))
+                {
+                    var p = Path.Combine(dir, "Scripts", "esptool.exe");
+                    if (File.Exists(p)) return p;
+                }
+            }
+        }
+        else
+        {
+            // Homebrew install locations (Apple Silicon and Intel)
+            foreach (var p in new[] { "/opt/homebrew/bin/esptool", "/usr/local/bin/esptool" })
+                if (File.Exists(p)) return p;
+
+            // pip --user: ~/Library/Python/3.x/bin/
+            var libPython = Path.Combine(home, "Library", "Python");
+            if (Directory.Exists(libPython))
+            {
+                foreach (var ver in Directory.GetDirectories(libPython).OrderByDescending(d => d))
+                {
+                    foreach (var name in new[] { "esptool", "esptool.py" })
+                    {
+                        var p = Path.Combine(ver, "bin", name);
+                        if (File.Exists(p)) return p;
+                    }
+                }
+            }
+
+            // ~/.local/bin/esptool
+            var localBin = Path.Combine(home, ".local", "bin", "esptool");
+            if (File.Exists(localBin)) return localBin;
+        }
+
         return null;
     }
 
@@ -173,12 +334,16 @@ public class EspToolRunner
         CancellationToken ct,
         IProgress<FlashProgressInfo>? progress = null)
     {
+        // PyInstaller --onedir bundles find their _internal/ dir relative to WorkingDirectory.
+        var workingDir = Path.GetDirectoryName(_esptoolPath) ?? AppContext.BaseDirectory;
+
         var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
                 FileName = _esptoolPath,
                 Arguments = arguments,
+                WorkingDirectory = workingDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -215,7 +380,17 @@ public class EspToolRunner
             OutputReceived?.Invoke(this, e.Data);
         };
 
-        process.Start();
+        Util.FileLogger.Log($"[esptool] Starting: {_esptoolPath} {arguments}");
+        Util.FileLogger.Log($"[esptool] WorkingDirectory: {workingDir}");
+        try
+        {
+            process.Start();
+        }
+        catch (Exception ex)
+        {
+            Util.FileLogger.Log($"[esptool] Process.Start threw: {ex}");
+            return (-1, "");
+        }
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
@@ -229,9 +404,11 @@ public class EspToolRunner
             throw;
         }
 
+        Util.FileLogger.Log($"[esptool] ExitCode={process.ExitCode}");
         if (process.ExitCode != 0)
         {
             var error = errorBuilder.ToString().Trim();
+            Util.FileLogger.Log($"[esptool] stderr={error}");
             if (!string.IsNullOrEmpty(error))
                 OutputReceived?.Invoke(this, $"ERROR: {error}");
         }

@@ -6,6 +6,10 @@
 # copies have no notarization ticket. --onedir keeps everything on disk inside
 # the app bundle, so each component can be signed and notarized at build time.
 #
+# Note: the App Store upload script (mac_appstore_upload.sh) removes this
+# bundle before submission because App Store rejects embedded Python3.framework.
+# This build is used by Release (direct download) and AppStoreLocal only.
+#
 # Output: busytag-lib/Tools/macos/esptool/ (directory)
 #   ├── esptool                (bootloader executable)
 #   └── _internal/             (Python runtime + libs + esptool package)
