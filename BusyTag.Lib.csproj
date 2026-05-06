@@ -96,10 +96,11 @@
     </ItemGroup>
 
     <!-- Dependencies -->
+    <!-- NOTE: Cloud-comm (SocketIOClient, BusyTagCloudClient, BusyTagWebSocketClient) lives in
+         BusyTag.Cloud.Lib now. busytag-lib stays USB-side only. -->
     <ItemGroup>
         <PackageReference Include="System.IO.Ports" Version="9.0.14" />
         <PackageReference Include="System.Text.Json" Version="9.0.14" />
-        <PackageReference Include="SocketIOClient" Version="3.1.2" />
         <PackageReference Include="System.Management" Version="9.0.14" />
     </ItemGroup>
 
