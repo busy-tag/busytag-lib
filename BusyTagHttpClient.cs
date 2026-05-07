@@ -207,7 +207,7 @@ public class BusyTagHttpClient : IDisposable
     /// </summary>
     public async Task<bool> StartWifiScanAsync()
     {
-        var response = await SendAtCommandAsync("AT+WSCAN");
+        var response = await SendAtCommandAsync("AT+WSCAN=");
         return response.IsSuccess && (response.Data?.Contains("OK") ?? false);
     }
 
