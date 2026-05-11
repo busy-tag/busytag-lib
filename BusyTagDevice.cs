@@ -31,6 +31,7 @@ public class BusyTagDevice(string? portName)
     public event EventHandler<bool>? PlayPatternStatus;
     public event EventHandler<bool>? WritingInStorage;
     public event EventHandler<string>? FirmwareUpdateError;
+    public event EventHandler<WifiConnectionEventArgs>? WifiConnectionChanged;
     private SerialPort? _serialPort;
     private readonly object _lockObject = new object();
     private DeviceConfig _deviceConfig = new();
@@ -868,6 +869,25 @@ public class BusyTagDevice(string? portName)
                                 if (!isWriting) Thread.Sleep(100);
                                 WritingInStorage?.Invoke(this, isWriting);
                             }
+                            else if (args[0].Equals("WIFI_CONNECTED") && args.Length >= 3)
+                            {
+                                WifiConnectionChanged?.Invoke(this, new WifiConnectionEventArgs
+                                {
+                                    Connected = true,
+                                    Ssid = args[1].Trim(),
+                                    IpAddress = args[2].Trim(),
+                                });
+                            }
+                            else if (args[0].Equals("WIFI_CONNECT_FAILED") && args.Length >= 3)
+                            {
+                                int.TryParse(args[2].Trim(), out var reason);
+                                WifiConnectionChanged?.Invoke(this, new WifiConnectionEventArgs
+                                {
+                                    Connected = false,
+                                    Ssid = args[1].Trim(),
+                                    ReasonCode = reason,
+                                });
+                            }
                         }
                     }
                 }
@@ -1228,20 +1248,125 @@ public class BusyTagDevice(string? portName)
         return response.Contains("OK");
     }
 
+    /// <summary>
+    /// Reports whether the connected device runs the WiFi-capable firmware (v3.0+).
+    /// AT+WM, AT+STA, AT+WSCAN and other WiFi commands are only available when this is true.
+    /// </summary>
+    public bool IsWifiCapable => FirmwareVersionFloat >= 3.0f;
+
     public async Task<bool> SetWifiStationCredentialsAsync(string ssid, string password)
     {
-        var response = await SendCommandAsync($"AT+STA={ssid},{password}", 1000);
+        var response = await SendCommandAsync($"AT+STA={ssid},{password}", 5000);
+        return response.Contains("OK");
+    }
+
+    public async Task<bool> SetWifiModeAsync(WifiMode mode)
+    {
+        var response = await SendCommandAsync($"AT+WM={(int)mode}", 2000);
         return response.Contains("OK");
     }
 
     public async Task<bool> SetWifiModeAsync(int mode)
     {
-        // Mode: 0=OFF, 1=STA, 2=AP, 3=STA+AP
         if (mode is < 0 or > 3)
             throw new ArgumentOutOfRangeException(nameof(mode), "WiFi mode must be between 0 and 3");
+        return await SetWifiModeAsync((WifiMode)mode);
+    }
 
-        var response = await SendCommandAsync($"AT+WM={mode}", 2000);
+    public async Task<WifiMode?> GetWifiModeAsync()
+    {
+        var response = await SendCommandAsync("AT+WM?", 500);
+        var line = ExtractPrefixedLine(response, "+WM:");
+        if (line == null || !int.TryParse(line.Trim(), out var value)) return null;
+        return value is >= 0 and <= 3 ? (WifiMode)value : null;
+    }
+
+    public async Task<WifiStationStatus?> GetWifiStationStatusAsync()
+    {
+        var response = await SendCommandAsync("AT+STA?", 500);
+        var line = ExtractPrefixedLine(response, "+STA:");
+        if (line == null) return null;
+
+        var trimmed = line.Trim();
+        if (trimmed.Equals("DISABLED", StringComparison.OrdinalIgnoreCase))
+            return WifiStationStatus.Disabled();
+
+        // Format: <connected>,<ssid>,<ip>,<rssi>
+        var parts = trimmed.Split(',');
+        if (parts.Length < 4) return null;
+        var connected = parts[0].Trim() == "1";
+        int.TryParse(parts[3].Trim(), out var rssi);
+        return new WifiStationStatus
+        {
+            Enabled = true,
+            Connected = connected,
+            Ssid = parts[1].Trim(),
+            IpAddress = parts[2].Trim(),
+            Rssi = rssi,
+        };
+    }
+
+    public async Task<bool> DisconnectWifiStationAsync()
+    {
+        var response = await SendCommandAsync("AT+DSTA", 2000);
         return response.Contains("OK");
+    }
+
+    public async Task<string?> GetIpAddressAsync()
+    {
+        var response = await SendCommandAsync("AT+GIP", 500);
+        var line = ExtractPrefixedLine(response, "+IP:");
+        return line?.Trim();
+    }
+
+    public async Task<bool> StartWifiScanAsync()
+    {
+        // Firmware accepts AT+WSCAN=[ssid_filter[,auth]]; the trailing '='
+        // is required even with no filter — bare AT+WSCAN returns ERROR:1.
+        var response = await SendCommandAsync("AT+WSCAN=", 1000);
+        return response.Contains("OK");
+    }
+
+    /// <summary>
+    /// Returns scan results once available. Returns an empty list if the device is still
+    /// scanning (responds with +WSCAN:BUSY) — caller should retry after a short delay.
+    /// </summary>
+    public async Task<List<WifiAccessPoint>> GetWifiScanResultsAsync()
+    {
+        var response = await SendCommandAsync("AT+WSCAN?", 1500, false);
+        var results = new List<WifiAccessPoint>();
+        if (response.Contains("+WSCAN:BUSY")) return results;
+
+        var lines = response.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+            if (!line.StartsWith("+WSCAN:")) continue;
+            var data = line[7..];
+            // Skip the count header "+WSCAN:<count>"
+            if (data.IndexOf(',') < 0) continue;
+            var parts = data.Split(',');
+            if (parts.Length < 4) continue;
+            int.TryParse(parts[1].Trim(), out var channel);
+            int.TryParse(parts[2].Trim(), out var rssi);
+            results.Add(new WifiAccessPoint
+            {
+                Ssid = parts[0].Trim(),
+                Channel = channel,
+                Rssi = rssi,
+                AuthMode = parts[3].Trim(),
+            });
+        }
+        return results;
+    }
+
+    private static string? ExtractPrefixedLine(string response, string prefix)
+    {
+        var idx = response.IndexOf(prefix, StringComparison.Ordinal);
+        if (idx < 0) return null;
+        var start = idx + prefix.Length;
+        var end = response.IndexOfAny(['\r', '\n'], start);
+        return end < 0 ? response[start..] : response[start..end];
     }
 
     public async Task<bool> SetSolidColorAsync(string color, int brightness = 100, int ledBits = 127)
