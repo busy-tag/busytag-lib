@@ -7,7 +7,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/busy-tag/busytag-lib)
 [![Build and Test](https://github.com/busy-tag/busytag-lib/actions/workflows/build-test.yml/badge.svg)](https://github.com/busy-tag/busytag-lib/actions/workflows/build-test.yml)
 
-A powerful and intuitive .NET library for seamless BusyTag device management via USB serial and cloud communication. Control LED patterns, manage files, configure devices, and connect to the BusyTag cloud across Windows, macOS, and Linux platforms.
+A powerful and intuitive .NET library for seamless Busy Tag device management via USB serial and cloud communication. Control LED patterns, manage files, configure devices, and connect to the Busy Tag cloud across Windows, macOS, and Linux platforms.
 
 ## 🚀 Key Features
 
@@ -114,7 +114,7 @@ if (devices?.Any() == true)
   - Windows 10 version 1903 or later
   - macOS 10.15 (Catalina) or later
   - Linux (experimental, enable via `EnableExperimentalLinuxSupport`)
-- **Hardware**: BusyTag device with compatible firmware (v0.7+)
+- **Hardware**: Busy Tag device with compatible firmware (v0.7+)
 - **Permissions**: Serial port access rights
 - **Dependencies**: See table below
 
