@@ -80,6 +80,10 @@ public class BusyTagDevice(string? portName)
     private bool _sendingFile;
     private bool _uploadFinished;
 
+    // Set while ReconnectSerialAsync is in flight so the ConnectionTask watchdog
+    // does not observe the closed port as a real disconnect and tear _serialPort down.
+    private volatile bool _reconnecting;
+
     /// <summary>
     /// Returns true if the device is currently writing to storage (WIS,1 state)
     /// </summary>
@@ -94,6 +98,10 @@ public class BusyTagDevice(string? portName)
             while (!token.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(milliseconds), token);
+                // Skip the disconnect check while a serial reconnect is in flight —
+                // the port is intentionally closed between Close() and Open(), and
+                // tearing it down here would null _serialPort and NRE the reconnect.
+                if (_reconnecting) continue;
                 if (!IsConnected)
                 {
                     Disconnect();
@@ -279,6 +287,11 @@ public class BusyTagDevice(string? portName)
     /// </summary>
     private async Task<bool> ReconnectSerialAsync()
     {
+        // Suppress the ConnectionTask watchdog for the duration of the reconnect.
+        // Otherwise it may tick during the Close/Open window, observe IsConnected==false,
+        // and call Disconnect() — which nulls _serialPort and causes the post-await
+        // dereference here to throw NullReferenceException.
+        _reconnecting = true;
         try
         {
             if (_useIOKit)
@@ -298,12 +311,22 @@ public class BusyTagDevice(string? portName)
                 return IsConnected;
             }
 
-            if (_serialPort == null) return false;
-            var portName = _serialPort.PortName;
-            _serialPort.Close();
+            // Capture locally so the field can't be swapped out from under us mid-await.
+            var port = _serialPort;
+            if (port == null) return false;
+            var portName = port.PortName;
+            port.Close();
             await Task.Delay(500);
-            _serialPort.PortName = portName;
-            _serialPort.Open();
+            // Defense in depth: if Disconnect() ran despite the watchdog suppression
+            // (e.g. SendCommandAsync's !IsConnected branch), the field will be null
+            // or swapped — bail rather than NRE.
+            if (_serialPort == null || !ReferenceEquals(_serialPort, port))
+            {
+                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] Reconnect aborted: serial port was torn down during await");
+                return false;
+            }
+            port.PortName = portName;
+            port.Open();
             ClearBuffer();
             Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] Serial reconnect: IsConnected={IsConnected}");
             return IsConnected;
@@ -312,6 +335,10 @@ public class BusyTagDevice(string? portName)
         {
             Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] Reconnect failed: {ex.Message}");
             return false;
+        }
+        finally
+        {
+            _reconnecting = false;
         }
     }
 
@@ -696,6 +723,35 @@ public class BusyTagDevice(string? portName)
     }
 
     /// <summary>
+    /// Wait until no new serial bytes have arrived for <paramref name="quiescenceMs"/>
+    /// consecutive milliseconds, then clear the buffer. Used before commands whose
+    /// response is sensitive to leading garbage (e.g. AT+UF expects a clean '>'
+    /// prompt) to absorb stragglers from a prior command that may have timed out
+    /// while the device was still streaming.
+    /// </summary>
+    private async Task DrainUntilQuiescentAsync(int quiescenceMs = 200, int maxWaitMs = 1500)
+    {
+        var deadline = DateTime.Now.AddMilliseconds(maxWaitMs);
+        var lastCount = -1;
+        var lastChangeAt = DateTime.Now;
+        while (DateTime.Now < deadline)
+        {
+            var count = GetBufferCount();
+            if (count != lastCount)
+            {
+                lastCount = count;
+                lastChangeAt = DateTime.Now;
+            }
+            else if ((DateTime.Now - lastChangeAt).TotalMilliseconds >= quiescenceMs)
+            {
+                break;
+            }
+            await Task.Delay(20).ConfigureAwait(false);
+        }
+        ClearBuffer();
+    }
+
+    /// <summary>
     /// Get the number of bytes available in the buffer.
     /// </summary>
     private int GetBufferCount()
@@ -1021,7 +1077,13 @@ public class BusyTagDevice(string? portName)
         FileList = new List<FileStruct>();
         if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit))
         {
-            var response = await SendCommandAsync("AT+GFL", 500, false);
+            // AT+GFL streams one line per file followed by OK. With ~35 files the
+            // full response can take well over 500ms; a too-short timeout returns
+            // a partial response while the device continues streaming bytes into
+            // the buffer, which then corrupts the following commands (notably AT+UF,
+            // which needs a clean '>' prompt). Use a generous timeout so we wait
+            // for the OK terminator.
+            var response = await SendCommandAsync("AT+GFL", 800, false);
             FileList = ParseFileList(response, "+FL:");
         }
         else
@@ -1708,6 +1770,11 @@ public class BusyTagDevice(string? portName)
             // Use actual data length (not fileSize from FileInfo) to prevent mismatch
             // if the file was modified between FileInfo read and ReadAllBytes
             FileLogger.Log($"[SendFileViaSerial] sending AT+UF={fileName},{data.Length}");
+            // Absorb stragglers from any prior command (e.g. a long AT+GFL response
+            // that completed after its SendCommandAsync timeout). AT+UF returns a
+            // bare '>' prompt with no other framing, so any leading garbage causes
+            // the '>' detection to fail and triggers a costly reconnection.
+            await DrainUntilQuiescentAsync();
             var response = await SendCommandAsync($"AT+UF={fileName},{data.Length}", 2000);
             FileLogger.Log($"[SendFileViaSerial] AT+UF response='{response.Trim()}'");
             if (!response.Contains(">"))
@@ -1952,13 +2019,19 @@ public class BusyTagDevice(string? portName)
 
     public async Task<bool> FreeUpStorage(long size)
     {
-        FileLogger.Log($"[FreeUpStorage] needed={size} FreeStorageSize={FreeStorageSize} fw={FirmwareVersionFloat}");
+        // Firmware's storage_ensure_space() requires free_bytes >= required + 100 KB headroom
+        // (cleanup_config.min_free_bytes). Match that here so the device never has to run its
+        // own storage_cleanup_auto() during AT+UF — that path is slow (multiple seconds) and
+        // pushes the device past our serial command timeout.
+        const long firmwareHeadroomBytes = 100 * 1024;
+        var requiredSize = size + firmwareHeadroomBytes;
+        FileLogger.Log($"[FreeUpStorage] needed={size}(+{firmwareHeadroomBytes} headroom={requiredSize}) FreeStorageSize={FreeStorageSize} fw={FirmwareVersionFloat}");
         if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit))
         {
             var counter = 0;
             await GetFreeStorageSizeAsync();
             FileLogger.Log($"[FreeUpStorage] after refresh: FreeStorageSize={FreeStorageSize}");
-            while (FreeStorageSize < size)
+            while (FreeStorageSize < requiredSize)
             {
                 FileLogger.Log($"[FreeUpStorage] not enough space, calling AutoDeleteFile (pass {counter + 1})");
                 if (await AutoDeleteFile() != true)
@@ -1979,7 +2052,7 @@ public class BusyTagDevice(string? portName)
             if (_busyTagDrive == null) return false;
             var counter = 0;
             await GetFreeStorageSizeAsync();
-            while (FreeStorageSize < size)
+            while (FreeStorageSize < requiredSize)
             {
                 DeleteOldestFileInDirectory(_busyTagDrive.Name);
                 await GetFreeStorageSizeAsync();
