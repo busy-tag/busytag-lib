@@ -1211,6 +1211,14 @@ public class BusyTagDevice(string? portName)
     }
 
     /// <summary>
+    /// Maximum image files (.png/.jpg/.gif) kept on the device. Beyond this we
+    /// delete oldest-first during storage integrity checks. Caps directory-entry
+    /// growth that the ESP32 filesystem can't otherwise reclaim, which was
+    /// surfacing as ERROR:3 (file_not_found from fopen) with bytes still free.
+    /// </summary>
+    private const int MaxStoredImages = 20;
+
+    /// <summary>
     /// Validates storage integrity using multiple checks.
     /// If corruption is detected, formats the disk to fix it.
     /// </summary>
@@ -1218,6 +1226,8 @@ public class BusyTagDevice(string? portName)
     {
         try
         {
+            await EnforceMaxImageCountAsync();
+
             var totalFileSizes = FileList.Sum(f => f.Size);
             var usedStorageSize = TotalStorageSize - FreeStorageSize;
             var fileCount = FileList.Count;
@@ -1263,13 +1273,43 @@ public class BusyTagDevice(string? portName)
 
             if (needsFormat)
             {
-                Debug.WriteLine($"Storage integrity issue detected: {reason}. Formatting disk...");
-                await FormatDiskAsync();
-                // Refresh storage info after format
-                await GetTotalStorageSizeAsync();
-                await GetFreeStorageSizeAsync();
+                // Defensive re-check: FileList can momentarily be empty when
+                // another caller is mid-GetFileListAsync (the method clears
+                // FileList at its very start before sending AT+GFL). If we
+                // formatted on that race we would WIPE THE USER'S DATA. So
+                // before pulling the trigger, refresh and re-evaluate.
+                Debug.WriteLine($"Storage integrity issue suspected: {reason}. Re-fetching file list before formatting...");
                 await GetFileListAsync();
-                Debug.WriteLine("Storage formatted and refreshed successfully.");
+                await GetFreeStorageSizeAsync();
+                var recheckedFileCount = FileList.Count;
+                var recheckedTotalFileSizes = FileList.Sum(f => f.Size);
+                var recheckedUsedStorage = TotalStorageSize - FreeStorageSize;
+
+                var stillNeedsFormat = false;
+                if (recheckedFileCount > 0 && recheckedUsedStorage <= 0)
+                    stillNeedsFormat = true;
+                else if (recheckedFileCount == 0 && recheckedUsedStorage > 1024)
+                    stillNeedsFormat = true;
+                else if (recheckedFileCount > 0 && recheckedTotalFileSizes > 0)
+                {
+                    var tolerance = Math.Max(recheckedUsedStorage * 0.1, 65536);
+                    if (Math.Abs(recheckedTotalFileSizes - recheckedUsedStorage) > tolerance)
+                        stillNeedsFormat = true;
+                }
+
+                if (!stillNeedsFormat)
+                {
+                    Debug.WriteLine($"Storage integrity FALSE ALARM after re-fetch: {recheckedFileCount} files, {recheckedTotalFileSizes} bytes in files, {recheckedUsedStorage} bytes used. Skipping format.");
+                }
+                else
+                {
+                    Debug.WriteLine($"Storage integrity confirmed bad after re-fetch ({reason}). Formatting disk...");
+                    await FormatDiskAsync();
+                    await GetTotalStorageSizeAsync();
+                    await GetFreeStorageSizeAsync();
+                    await GetFileListAsync();
+                    Debug.WriteLine("Storage formatted and refreshed successfully.");
+                }
             }
             else
             {
@@ -1280,6 +1320,60 @@ public class BusyTagDevice(string? portName)
         {
             Debug.WriteLine($"Error validating storage integrity: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Deletes image files in FileList order until count is at or below
+    /// MaxStoredImages. The currently-displayed file is never deleted —
+    /// the firmware refuses AT+DF on an in-use file with ERROR:0.
+    /// </summary>
+    private async Task EnforceMaxImageCountAsync()
+    {
+        // Refresh first — FileList can be stale or momentarily empty if another
+        // caller is mid-GetFileListAsync (which clears FileList at its start
+        // before sending AT+GFL). Operating on that snapshot would either
+        // miss real candidates or, worse, let the downstream integrity check
+        // misread an empty list as corruption and format the device.
+        // SendCommandAsync is mutexed, so this serializes against any other
+        // in-flight GetFileListAsync and FileList is fresh when it returns.
+        await GetFileListAsync();
+
+        var imageFiles = FileList
+            .Where(f => f.Name.EndsWith(".png") || f.Name.EndsWith(".jpg") || f.Name.EndsWith(".gif"))
+            .ToList();
+
+        if (imageFiles.Count <= MaxStoredImages)
+            return;
+
+        var excess = imageFiles.Count - MaxStoredImages;
+        Debug.WriteLine($"[EnforceMaxImageCount] {imageFiles.Count} images on device, exceeds cap of {MaxStoredImages}. Deleting {excess}.");
+
+        foreach (var item in imageFiles)
+        {
+            if (excess <= 0) break;
+            if (CurrentImageName == item.Name) continue;
+
+            try
+            {
+                if (await DeleteFile(item.Name))
+                {
+                    FileList.RemoveAll(f => f.Name == item.Name);
+                    excess--;
+                    Debug.WriteLine($"[EnforceMaxImageCount] deleted '{item.Name}'");
+                }
+                else
+                {
+                    Debug.WriteLine($"[EnforceMaxImageCount] device refused delete of '{item.Name}', skipping");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[EnforceMaxImageCount] error deleting '{item.Name}': {ex.Message}");
+            }
+        }
+
+        if (excess > 0)
+            Debug.WriteLine($"[EnforceMaxImageCount] still {excess} over the cap (active file or delete refusals)");
     }
 
     public async Task<bool> ActivateFileStorageScanAsync()
@@ -1998,20 +2092,11 @@ public class BusyTagDevice(string? portName)
             }
         }
 
-        // Second pass: also allow deleting the current image — we're about to replace it anyway
-        foreach (var item in FileList)
-        {
-            if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit) ||
-                item.Name.EndsWith("png") || item.Name.EndsWith("jpg") || item.Name.EndsWith("gif"))
-            {
-                FileLogger.Log($"[AutoDeleteFile] fallback: deleting current image '{item.Name}'");
-                if (await DeleteFile(item.Name))
-                {
-                    FileList.Remove(item);
-                    return true;
-                }
-            }
-        }
+        // The previous fallback pass tried to delete the currently-displayed file as
+        // a last resort, but the firmware refuses AT+DF on an in-use file (returns
+        // ERROR:0) — so it never freed anything and just produced noisy errors.
+        // We now skip the active file entirely; if it's the only candidate, cleanup
+        // fails and the caller surfaces InsufficientStorage rather than thrashing.
 
         FileLogger.Log("[AutoDeleteFile] nothing to delete, returning false");
         return false;
