@@ -1853,6 +1853,41 @@ public class BusyTagDevice(string? portName)
                 await SetShowAfterDropAsync(true);
             }
 
+            // If we're about to overwrite the file the device is currently
+            // displaying, the PNG/GIF decoder still holds it open and AT+UF
+            // will fail at write time with "Failed to open file for writing"
+            // → ERROR:3. Switch the device to a different picture first to
+            // release the lock. The caller will issue its own AT+SP after
+            // upload, so restoring the original isn't necessary here.
+            if (!string.IsNullOrEmpty(CurrentImageName) &&
+                string.Equals(CurrentImageName, fileName, StringComparison.OrdinalIgnoreCase))
+            {
+                var releaseTarget = PickReleaseTarget(fileName);
+                if (releaseTarget != null)
+                {
+                    FileLogger.Log($"[SendFileViaSerial] file '{fileName}' is currently displayed; switching to '{releaseTarget}' to release the lock");
+                    // Clear _sendingFile so a stray response from AT+SP doesn't
+                    // trip FilterResponse into cancelling the upload.
+                    _sendingFile = false;
+                    try
+                    {
+                        await ShowPictureAsync(releaseTarget);
+                        // Brief settle so the device finishes closing the old
+                        // PNG/GIF decoder before we ask it to open the same
+                        // filename for writing.
+                        await Task.Delay(150);
+                    }
+                    finally
+                    {
+                        _sendingFile = true;
+                    }
+                }
+                else
+                {
+                    FileLogger.Log($"[SendFileViaSerial] file '{fileName}' is currently displayed but no other file is available to switch to; proceeding anyway");
+                }
+            }
+
             var data = await File.ReadAllBytesAsync(sourcePath);
             // Sandboxed + fw < 2.0: USB CDC buffer is 64 bytes, use 128-byte chunks to avoid overflow
             var chunkSize = (IsSandboxed && FirmwareVersionFloat < 2.0f) ? 128 : 1024 * 32;
@@ -1867,34 +1902,39 @@ public class BusyTagDevice(string? portName)
             // Absorb stragglers from any prior command (e.g. a long AT+GFL response
             // that completed after its SendCommandAsync timeout). AT+UF returns a
             // bare '>' prompt with no other framing, so any leading garbage causes
-            // the '>' detection to fail and triggers a costly reconnection.
+            // the '>' detection to fail.
             await DrainUntilQuiescentAsync();
-            var response = await SendCommandAsync($"AT+UF={fileName},{data.Length}", 2000);
+            // Generous timeout: under memory pressure the device may take 500ms+
+            // to allocate its write buffer before emitting '>'. A short timeout
+            // here races the device and the late '>' poisons the next command.
+            const int upfPromptTimeoutMs = 5000;
+            var response = await SendCommandAsync($"AT+UF={fileName},{data.Length}", upfPromptTimeoutMs);
             FileLogger.Log($"[SendFileViaSerial] AT+UF response='{response.Trim()}'");
             if (!response.Contains(">"))
             {
-                // Device may be in error state from a previous operation (e.g. ERROR:0 timeout).
-                // Reconnect the serial port to reset device state, then retry once.
-                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] AT+UF no '>' response, reconnecting serial and retrying");
-                FileLogger.Log("[SendFileViaSerial] no '>' — reconnecting and retrying");
-                _sendingFile = false; // Temporarily clear so FilterResponse won't cancel
+                // Soft retry: drain any stragglers (a late '>' or ERROR:3 from this
+                // attempt, or leftover output from a prior command) and re-issue the
+                // command. Do NOT toggle the serial port — closing/reopening the host
+                // handle desynchronises the device's USB CDC endpoint state and
+                // wedges subsequent uploads. Reconnect is intentionally not used here;
+                // empirically the device stays responsive after ERROR:3 / slow '>'.
+                Debug.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}][FileUpload] AT+UF no '>' response, draining and retrying");
+                FileLogger.Log("[SendFileViaSerial] no '>' — draining and retrying (no reconnect)");
 
-                if (!await ReconnectSerialAsync())
-                {
-                    FileLogger.Log("[SendFileViaSerial] reconnect FAILED");
-                    CancelFileUpload(false, UploadErrorType.DeviceError,
-                        "Device did not respond properly to upload command and reconnect failed");
-                    return false;
-                }
-
+                // Clear _sendingFile while we drain so a late ERROR from the failed
+                // attempt doesn't trip FilterResponse into cancelling the upload.
+                _sendingFile = false;
+                await DrainUntilQuiescentAsync(quiescenceMs: 300, maxWaitMs: 2000);
+                await Task.Delay(500); // brief back-off to let the device recover
                 _sendingFile = true;
-                response = await SendCommandAsync($"AT+UF={fileName},{data.Length}", 2000);
+
+                response = await SendCommandAsync($"AT+UF={fileName},{data.Length}", upfPromptTimeoutMs);
                 FileLogger.Log($"[SendFileViaSerial] AT+UF retry response='{response.Trim()}'");
                 if (!response.Contains(">"))
                 {
-                    FileLogger.Log("[SendFileViaSerial] AT+UF still no '>' after reconnect — aborting");
+                    FileLogger.Log("[SendFileViaSerial] AT+UF still no '>' after soft retry — aborting");
                     CancelFileUpload(false, UploadErrorType.DeviceError,
-                        "Device did not respond properly to upload command after reconnect");
+                        "Device did not respond to upload command after retry");
                     return false;
                 }
             }
@@ -2067,6 +2107,30 @@ public class BusyTagDevice(string? portName)
         var oldestFile = files.First();
         oldestFile.Delete();
         Debug.WriteLine($"Deleted oldest file: {oldestFile.Name}");
+    }
+
+    /// <summary>
+    /// Pick a file on the device we can ask AT+SP= to display so that the
+    /// firmware closes its decoder on <paramref name="aboutToOverwrite"/> and
+    /// releases the file lock. Prefers "def.png" (always shipped with the
+    /// firmware) and falls back to any other file in <see cref="FileList"/>.
+    /// Returns null if no suitable target exists.
+    /// </summary>
+    private string? PickReleaseTarget(string aboutToOverwrite)
+    {
+        const string defaultFile = "def.png";
+        if (!string.Equals(aboutToOverwrite, defaultFile, StringComparison.OrdinalIgnoreCase) &&
+            FileList.Any(f => string.Equals(f.Name, defaultFile, StringComparison.OrdinalIgnoreCase)))
+        {
+            return defaultFile;
+        }
+
+        // FileStruct is a value type, so we project to nullable string first
+        // (FirstOrDefault on a struct returns default, not null).
+        return FileList
+            .Where(f => !string.Equals(f.Name, aboutToOverwrite, StringComparison.OrdinalIgnoreCase))
+            .Select(f => (string?)f.Name)
+            .FirstOrDefault();
     }
 
     private async Task<bool> AutoDeleteFile()
