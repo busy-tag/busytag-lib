@@ -80,6 +80,14 @@ public class BusyTagDevice(string? portName)
     private bool _sendingFile;
     private bool _uploadFinished;
 
+    // True while we issue an internal AT+SP solely to release the file lock
+    // on the currently-displayed file before AT+UF. Suppresses
+    // ReceivedShowingPicture so the upper-layer DeviceInteractionManager does
+    // not interpret the switch as "image update complete" and release its
+    // concurrency lock mid-upload, which would let another upload start and
+    // interleave AT commands on the serial line, wedging the device.
+    private volatile bool _suppressShowingPictureEvent;
+
     // Set while ReconnectSerialAsync is in flight so the ConnectionTask watchdog
     // does not observe the closed port as a real disconnect and tear _serialPort down.
     private volatile bool _reconnecting;
@@ -906,7 +914,8 @@ public class BusyTagDevice(string? portName)
                                 CurrentImageName = args[1].Trim();
                                 if (!FileExistsInCache(CurrentImageName))
                                     _ = GetFileAsync(CurrentImageName);
-                                ReceivedShowingPicture?.Invoke(this, CurrentImageName);
+                                if (!_suppressShowingPictureEvent)
+                                    ReceivedShowingPicture?.Invoke(this, CurrentImageName);
                             }
                             else if (args[0].Equals("FU"))
                             {
@@ -1859,6 +1868,13 @@ public class BusyTagDevice(string? portName)
             // → ERROR:3. Switch the device to a different picture first to
             // release the lock. The caller will issue its own AT+SP after
             // upload, so restoring the original isn't necessary here.
+            //
+            // Send AT+SP directly (not via ShowPictureAsync) and suppress the
+            // +evn:SP event: the upper-layer DeviceInteractionManager treats
+            // ReceivedShowingPicture as "image update complete" and would
+            // release its concurrency lock mid-upload, letting another upload
+            // start and interleave AT commands on the serial line — wedging
+            // the device's parser in "receive N bytes" mode forever.
             if (!string.IsNullOrEmpty(CurrentImageName) &&
                 string.Equals(CurrentImageName, fileName, StringComparison.OrdinalIgnoreCase))
             {
@@ -1866,12 +1882,11 @@ public class BusyTagDevice(string? portName)
                 if (releaseTarget != null)
                 {
                     FileLogger.Log($"[SendFileViaSerial] file '{fileName}' is currently displayed; switching to '{releaseTarget}' to release the lock");
-                    // Clear _sendingFile so a stray response from AT+SP doesn't
-                    // trip FilterResponse into cancelling the upload.
-                    _sendingFile = false;
+                    _suppressShowingPictureEvent = true;
                     try
                     {
-                        await ShowPictureAsync(releaseTarget);
+                        var spResponse = await SendCommandAsync($"AT+SP={releaseTarget}", 1000);
+                        FileLogger.Log($"[SendFileViaSerial] AT+SP={releaseTarget} response='{spResponse.Trim()}'");
                         // Brief settle so the device finishes closing the old
                         // PNG/GIF decoder before we ask it to open the same
                         // filename for writing.
@@ -1879,7 +1894,7 @@ public class BusyTagDevice(string? portName)
                     }
                     finally
                     {
-                        _sendingFile = true;
+                        _suppressShowingPictureEvent = false;
                     }
                 }
                 else
