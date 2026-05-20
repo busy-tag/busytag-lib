@@ -927,6 +927,15 @@ public class BusyTagDevice(string? portName)
                                 _isPlayingPattern = int.Parse(args[1]) != 0;
                                 PlayPatternStatus?.Invoke(this, _isPlayingPattern);
                             }
+                            else if (args[0].Equals("SC") && args.Length >= 3 &&
+                                     int.TryParse(args[1].Trim(), out var scLedBits))
+                            {
+                                // +evn:SC,<led_bits>,<RRGGBB> — fw mirrors any solid-colour
+                                // commit (AT+SC, button-driven, pattern revert) so a USB-tethered
+                                // host learns about colour changes driven by remote controllers.
+                                ReceivedSolidColor?.Invoke(this,
+                                    new LedArgs { LedBits = scLedBits, Color = args[2].Trim() });
+                            }
                             else if (args[0].Equals("WIS"))
                             {
                                 var isWriting = args[1].Trim() != "0";
