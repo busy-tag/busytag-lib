@@ -87,12 +87,18 @@
         <None Include="build\BusyTag.Lib.targets" Pack="true" PackagePath="buildTransitive\BusyTag.Lib.targets" />
     </ItemGroup>
 
-    <!-- Embedded firmware binaries for ESP32-S3 recovery -->
+    <!-- Embedded firmware binaries for ESP32-S3 recovery.
+         v2 = legacy hardware without SPIRAM (nowifi build).
+         v3 = SPIRAM-equipped hardware (wifi build). -->
     <ItemGroup>
-        <EmbeddedResource Include="Firmware\bootloader.bin" LogicalName="BusyTag.Lib.Firmware.bootloader.bin" />
-        <EmbeddedResource Include="Firmware\partition-table.bin" LogicalName="BusyTag.Lib.Firmware.partition-table.bin" />
-        <EmbeddedResource Include="Firmware\file_server.bin" LogicalName="BusyTag.Lib.Firmware.file_server.bin" />
-        <EmbeddedResource Include="Firmware\ota_data_initial.bin" LogicalName="BusyTag.Lib.Firmware.ota_data_initial.bin" />
+        <EmbeddedResource Include="Firmware\v2\bootloader.bin" LogicalName="BusyTag.Lib.Firmware.v2.bootloader.bin" />
+        <EmbeddedResource Include="Firmware\v2\partition-table.bin" LogicalName="BusyTag.Lib.Firmware.v2.partition-table.bin" />
+        <EmbeddedResource Include="Firmware\v2\file_server.bin" LogicalName="BusyTag.Lib.Firmware.v2.file_server.bin" />
+        <EmbeddedResource Include="Firmware\v2\ota_data_initial.bin" LogicalName="BusyTag.Lib.Firmware.v2.ota_data_initial.bin" />
+        <EmbeddedResource Include="Firmware\v3\bootloader.bin" LogicalName="BusyTag.Lib.Firmware.v3.bootloader.bin" />
+        <EmbeddedResource Include="Firmware\v3\partition-table.bin" LogicalName="BusyTag.Lib.Firmware.v3.partition-table.bin" />
+        <EmbeddedResource Include="Firmware\v3\file_server.bin" LogicalName="BusyTag.Lib.Firmware.v3.file_server.bin" />
+        <EmbeddedResource Include="Firmware\v3\ota_data_initial.bin" LogicalName="BusyTag.Lib.Firmware.v3.ota_data_initial.bin" />
     </ItemGroup>
 
     <!-- Dependencies -->

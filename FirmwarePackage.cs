@@ -2,6 +2,14 @@ using System.Reflection;
 
 namespace BusyTag.Lib;
 
+public enum FirmwareVariant
+{
+    /// <summary>Legacy hardware without SPIRAM (nowifi build).</summary>
+    V2NoSpiram,
+    /// <summary>SPIRAM-equipped hardware (wifi build).</summary>
+    V3Spiram
+}
+
 public class FirmwarePackage : IDisposable
 {
     public required string BootloaderPath { get; init; }      // -> 0x0
@@ -13,22 +21,30 @@ public class FirmwarePackage : IDisposable
     public string FlashFreq { get; init; } = "80m";
     public string FlashSize { get; init; } = "detect";
     public string Chip { get; init; } = "esp32s3";
+    public FirmwareVariant Variant { get; init; } = FirmwareVariant.V2NoSpiram;
 
     private string? _tempDir;
 
     /// <summary>
     /// Creates a FirmwarePackage from embedded resources extracted to a temp directory.
     /// </summary>
-    public static FirmwarePackage FromEmbeddedResources()
+    public static FirmwarePackage FromEmbeddedResources(FirmwareVariant variant = FirmwareVariant.V2NoSpiram)
     {
         var assembly = Assembly.GetExecutingAssembly();
         var tempDir = Path.Combine(Path.GetTempPath(), $"busytag-firmware-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
 
-        ExtractResource(assembly, "BusyTag.Lib.Firmware.bootloader.bin", Path.Combine(tempDir, "bootloader.bin"));
-        ExtractResource(assembly, "BusyTag.Lib.Firmware.partition-table.bin", Path.Combine(tempDir, "partition-table.bin"));
-        ExtractResource(assembly, "BusyTag.Lib.Firmware.file_server.bin", Path.Combine(tempDir, "file_server.bin"));
-        ExtractResource(assembly, "BusyTag.Lib.Firmware.ota_data_initial.bin", Path.Combine(tempDir, "ota_data_initial.bin"));
+        var prefix = variant switch
+        {
+            FirmwareVariant.V2NoSpiram => "BusyTag.Lib.Firmware.v2.",
+            FirmwareVariant.V3Spiram => "BusyTag.Lib.Firmware.v3.",
+            _ => throw new ArgumentOutOfRangeException(nameof(variant))
+        };
+
+        ExtractResource(assembly, prefix + "bootloader.bin", Path.Combine(tempDir, "bootloader.bin"));
+        ExtractResource(assembly, prefix + "partition-table.bin", Path.Combine(tempDir, "partition-table.bin"));
+        ExtractResource(assembly, prefix + "file_server.bin", Path.Combine(tempDir, "file_server.bin"));
+        ExtractResource(assembly, prefix + "ota_data_initial.bin", Path.Combine(tempDir, "ota_data_initial.bin"));
 
         return new FirmwarePackage
         {
@@ -36,6 +52,7 @@ public class FirmwarePackage : IDisposable
             PartitionTablePath = Path.Combine(tempDir, "partition-table.bin"),
             ApplicationPath = Path.Combine(tempDir, "file_server.bin"),
             OtaDataPath = Path.Combine(tempDir, "ota_data_initial.bin"),
+            Variant = variant,
             _tempDir = tempDir
         };
     }
@@ -107,7 +124,7 @@ public class FirmwarePackage : IDisposable
     {
         var assembly = Assembly.GetExecutingAssembly();
         var names = assembly.GetManifestResourceNames();
-        return names.Any(n => n.Contains("Firmware.bootloader"));
+        return names.Any(n => n.Contains(".Firmware.v2.bootloader") || n.Contains(".Firmware.v3.bootloader"));
     }
 
     private static string FormatSize(string path)

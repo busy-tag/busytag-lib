@@ -299,6 +299,34 @@ public class EspToolRunner
     }
 
     /// <summary>
+    /// Detects whether the connected ESP32-S3 has SPIRAM/PSRAM by parsing the
+    /// "Features:" line that esptool prints during chip detection. Returns
+    /// null if detection failed (no output / esptool error) — caller should
+    /// fall back to asking the user.
+    /// </summary>
+    public async Task<ChipFeatures?> DetectChipFeaturesAsync(string port, CancellationToken ct = default)
+    {
+        var args = $"--chip esp32s3 --port {port} flash_id";
+        var (exitCode, output) = await RunEspToolAsync(args, ct);
+
+        if (string.IsNullOrWhiteSpace(output))
+            return null;
+
+        var featuresLine = output
+            .Split('\n')
+            .Select(l => l.Trim())
+            .FirstOrDefault(l => l.StartsWith("Features:", StringComparison.OrdinalIgnoreCase));
+
+        Util.FileLogger.Log($"[esptool] DetectChipFeatures exit={exitCode} features='{featuresLine}'");
+
+        if (featuresLine == null)
+            return exitCode == 0 ? new ChipFeatures(false, output) : null;
+
+        var hasPsram = featuresLine.Contains("PSRAM", StringComparison.OrdinalIgnoreCase);
+        return new ChipFeatures(hasPsram, featuresLine);
+    }
+
+    /// <summary>
     /// Flashes all firmware components to the device.
     /// </summary>
     public async Task<bool> FlashFirmwareAsync(
@@ -418,3 +446,5 @@ public class EspToolRunner
 }
 
 public record FlashProgressInfo(int Percent, string StatusMessage);
+
+public record ChipFeatures(bool HasPsram, string RawFeaturesLine);
