@@ -55,6 +55,7 @@ public class BusyTagDevice(string? portName)
     public string FirmwareVersion { get; private set; } = string.Empty;
     public string HardwareVersion { get; private set; } = string.Empty;
     public float FirmwareVersionFloat { get; private set; }
+    public string CompileTime { get; private set; } = string.Empty;
 
     public string CurrentImageName { get; private set; } = string.Empty;
     private string CachedFileDirPath { get; set; } = string.Empty;
@@ -228,6 +229,8 @@ public class BusyTagDevice(string? portName)
         await GetDeviceIdAsync();
         await GetFirmwareVersionAsync();
         await GetHardwareVersionAsync();
+        if (FirmwareVersionFloat >= 2.0)
+            await GetCompileTimeAsync();
         await GetCurrentImageNameAsync();
         await GetSolidColorAsync();
         await GetDisplayBrightnessAsync();
@@ -1027,6 +1030,16 @@ public class BusyTagDevice(string? portName)
         var response = await SendCommandAsync("AT+GHV");
         HardwareVersion = response.Contains("+HV:") ? response.Split(':').Last() : "1.0";
         return HardwareVersion;
+    }
+
+    public async Task<string> GetCompileTimeAsync()
+    {
+        // Response format: +ESPCT:<compile_date> <compile_time>
+        var response = await SendCommandAsync("AT+GESPCT");
+        CompileTime = response.Contains("+ESPCT:")
+            ? response[(response.IndexOf("+ESPCT:", StringComparison.Ordinal) + "+ESPCT:".Length)..].Trim()
+            : string.Empty;
+        return CompileTime;
     }
 
     public async Task<string> GetCurrentImageNameAsync()
