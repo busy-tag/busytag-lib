@@ -57,6 +57,9 @@ public class BusyTagDevice(string? portName)
     public float FirmwareVersionFloat { get; private set; }
     public string CompileTime { get; private set; } = string.Empty;
 
+    /// <summary>Last internal chip temperature (Celsius) read via AT+GTEMP. 0 = unknown.</summary>
+    public float InternalTemperature { get; private set; }
+
     public string CurrentImageName { get; private set; } = string.Empty;
     private string CachedFileDirPath { get; set; } = string.Empty;
     public List<FileStruct> FileList { get; set; } = [];
@@ -1040,6 +1043,29 @@ public class BusyTagDevice(string? portName)
             ? response[(response.IndexOf("+ESPCT:", StringComparison.Ordinal) + "+ESPCT:".Length)..].Trim()
             : string.Empty;
         return CompileTime;
+    }
+
+    public async Task<float> GetInternalTemperatureAsync()
+    {
+        // AT+GTEMP was introduced in firmware 2.0 — older firmware returns ERROR.
+        if (FirmwareVersionFloat < 2.0) return InternalTemperature;
+        // Response format: +TEMP:<celsius>
+        var response = await SendCommandAsync("AT+GTEMP");
+        var idx = response.IndexOf("+TEMP:", StringComparison.Ordinal);
+        if (idx >= 0)
+        {
+            // Extract the numeric value directly after the prefix so trailing
+            // text (newlines, OK, ERROR:X) doesn't break the parse.
+            var start = idx + "+TEMP:".Length;
+            var end = start;
+            while (end < response.Length &&
+                   (char.IsDigit(response[end]) || response[end] == '.' || response[end] == '-'))
+                end++;
+            if (end > start &&
+                float.TryParse(response[start..end], NumberStyles.Float, CultureInfo.InvariantCulture, out var celsius))
+                InternalTemperature = celsius;
+        }
+        return InternalTemperature;
     }
 
     public async Task<string> GetCurrentImageNameAsync()
