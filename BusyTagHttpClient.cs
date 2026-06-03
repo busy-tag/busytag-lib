@@ -192,8 +192,14 @@ public class BusyTagHttpClient : IDisposable
     {
         try
         {
-            var response = await SendAtCommandAsync("AT");
-            return response.IsSuccess;
+            // Use AT+GDN instead of a bare AT: a single round-trip both proves
+            // the host is reachable and confirms it's actually a BusyTag (the
+            // reply carries +DN:busytag-…). A bare AT only yields a generic
+            // "success" that any AT-speaking endpoint would return. This mirrors
+            // the USB discovery probe in BusyTagManager.
+            var response = await SendAtCommandAsync("AT+GDN");
+            return response.IsSuccess &&
+                   (response.Data?.Contains("busytag", StringComparison.OrdinalIgnoreCase) ?? false);
         }
         catch
         {
