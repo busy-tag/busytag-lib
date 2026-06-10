@@ -238,6 +238,20 @@ public class BusyTagDevice(string? portName)
         await GetSolidColorAsync();
         await GetDisplayBrightnessAsync();
 
+        // v3.0+ devices keep an on-screen clock; push the host's local time zone so
+        // it tracks local time (incl. DST) without needing a network lookup.
+        if (FirmwareVersionFloat >= 3.0)
+        {
+            try
+            {
+                await SetTimezoneAsync(Util.PosixTimeZone.GetLocalPosixTz());
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to set device timezone: {ex.Message}");
+            }
+        }
+
         if (FirmwareVersionFloat < 2.0)
         {
             // USB mass storage is inaccessible in the sandboxed (App Store) build;
@@ -1261,9 +1275,33 @@ public class BusyTagDevice(string? portName)
         return response.Contains("OK");
     }
 
+    /// <summary>
+    /// Sets the device's time zone (v3.0+ firmware only) using a POSIX TZ string,
+    /// e.g. "CET-1CEST,M3.5.0,M10.5.0/3". The firmware persists it and applies it to
+    /// its on-screen clock. See <see cref="Util.PosixTimeZone"/> for building the string.
+    /// </summary>
+    public async Task<bool> SetTimezoneAsync(string posixTz)
+    {
+        if (string.IsNullOrWhiteSpace(posixTz)) return false;
+        var response = await SendCommandAsync($"AT+TZ={posixTz}", 500);
+        return response.Contains("OK");
+    }
+
     public async Task<bool> FormatDiskAsync()
     {
         var response = await SendCommandAsync("AT+FD", 2000);
+        return response.Contains("OK");
+    }
+
+    /// <summary>
+    /// Factory reset (v3.0+ WiFi firmware only): formats storage, erases NVS
+    /// settings (including WiFi credentials), then restarts the device with
+    /// defaults. Mirrors the 3-second hardware button hold. The device drops the
+    /// serial connection as it restarts, so an empty/timed-out response is normal.
+    /// </summary>
+    public async Task<bool> FactoryResetAsync()
+    {
+        var response = await SendCommandAsync("AT+FR", 2000);
         return response.Contains("OK");
     }
 
