@@ -1563,6 +1563,121 @@ public class BusyTagDevice(string? portName)
         return response.Contains("OK");
     }
 
+    /// <summary>
+    /// Enables or disables the on-screen top toolbar (AT+TB) that surfaces the
+    /// WiFi / clock / temperature status overlay. Firmware v3.0+.
+    /// </summary>
+    public async Task<bool> SetTopToolbarEnabledAsync(bool enabled)
+    {
+        var response = await SendCommandAsync($"AT+TB={(enabled ? 1 : 0)}", 2000);
+        return response.Contains("OK");
+    }
+
+    /// <summary>Reads whether the top toolbar is enabled (AT+TB?). Firmware v3.0+.</summary>
+    public async Task<bool?> GetTopToolbarEnabledAsync()
+    {
+        var response = await SendCommandAsync("AT+TB?", 500);
+        var line = ExtractPrefixedLine(response, "+TB:");
+        return line != null && int.TryParse(line.Trim(), out var value) ? value != 0 : null;
+    }
+
+    /// <summary>Enables or disables on-screen status messages (AT+SM). Firmware v3.0+.</summary>
+    public async Task<bool> SetStatusMessagesEnabledAsync(bool enabled)
+    {
+        var response = await SendCommandAsync($"AT+SM={(enabled ? 1 : 0)}", 2000);
+        return response.Contains("OK");
+    }
+
+    /// <summary>Reads whether on-screen status messages are enabled (AT+SM?). Firmware v3.0+.</summary>
+    public async Task<bool?> GetStatusMessagesEnabledAsync()
+    {
+        var response = await SendCommandAsync("AT+SM?", 500);
+        var line = ExtractPrefixedLine(response, "+SM:");
+        return line != null && int.TryParse(line.Trim(), out var value) ? value != 0 : null;
+    }
+
+    /// <summary>
+    /// Enables or disables the WiFi RSSI readout shown next to the toolbar WiFi icon
+    /// (AT+TBR). Firmware v3.0+.
+    /// </summary>
+    public async Task<bool> SetToolbarRssiEnabledAsync(bool enabled)
+    {
+        var response = await SendCommandAsync($"AT+TBR={(enabled ? 1 : 0)}", 2000);
+        return response.Contains("OK");
+    }
+
+    /// <summary>Reads whether the toolbar WiFi RSSI readout is enabled (AT+TBR?). Firmware v3.0+.</summary>
+    public async Task<bool?> GetToolbarRssiEnabledAsync()
+    {
+        var response = await SendCommandAsync("AT+TBR?", 500);
+        var line = ExtractPrefixedLine(response, "+TBR:");
+        return line != null && int.TryParse(line.Trim(), out var value) ? value != 0 : null;
+    }
+
+    /// <summary>Sets the status-bar opacity, 0–100 (AT+BO). Firmware v3.0+.</summary>
+    public async Task<bool> SetBarOpacityAsync(int opacity)
+    {
+        if (opacity is < 0 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(opacity), "Bar opacity must be between 0 and 100");
+        var response = await SendCommandAsync($"AT+BO={opacity}", 2000);
+        return response.Contains("OK");
+    }
+
+    /// <summary>Reads the status-bar opacity, 0–100 (AT+BO?). Firmware v3.0+.</summary>
+    public async Task<int?> GetBarOpacityAsync()
+    {
+        var response = await SendCommandAsync("AT+BO?", 500);
+        var line = ExtractPrefixedLine(response, "+BO:");
+        return line != null && int.TryParse(line.Trim(), out var value) ? value : null;
+    }
+
+    /// <summary>
+    /// Reads the per-item top-toolbar layout (AT+TBI?), one <see cref="ToolbarItem"/> per
+    /// reported item. Returns null when the device gives no parseable reply. Firmware v3.0+.
+    /// </summary>
+    public async Task<List<ToolbarItem>?> GetToolbarItemsAsync()
+    {
+        var response = await SendCommandAsync("AT+TBI?", 500);
+        if (string.IsNullOrEmpty(response)) return null;
+
+        List<ToolbarItem>? items = null;
+        // One "+TBI:<id>,<enabled>,<side>" line per item.
+        foreach (var line in response.Split('\n'))
+        {
+            var idx = line.IndexOf("+TBI:", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) continue;
+
+            var parts = line[(idx + 5)..].Split(',');
+            if (parts.Length < 3) continue;
+            if (!int.TryParse(parts[0].Trim(), out var id) ||
+                !int.TryParse(parts[1].Trim(), out var enabled) ||
+                !int.TryParse(parts[2].Trim(), out var side)) continue;
+
+            (items ??= []).Add(new ToolbarItem { Id = id, Enabled = enabled != 0, Side = side == 0 ? 0 : 1 });
+        }
+        return items;
+    }
+
+    /// <summary>Sets one toolbar item's enabled state and side (AT+TBI=id,enabled,side). Firmware v3.0+.</summary>
+    public async Task<bool> SetToolbarItemAsync(int id, bool enabled, int side)
+    {
+        var response = await SendCommandAsync($"AT+TBI={id},{(enabled ? 1 : 0)},{side}", 2000);
+        return response.Contains("OK");
+    }
+
+    /// <summary>
+    /// Aligns the on-screen overlay with the WiFi mode: the top toolbar surfaces WiFi /
+    /// clock / temperature, so it is turned off (and on-screen status messages turned on)
+    /// while WiFi is <see cref="WifiMode.Off"/>, and restored for any active mode. Apply
+    /// this wherever the WiFi mode changes so the overlay stays consistent. Firmware v3.0+.
+    /// </summary>
+    public async Task ApplyToolbarForWifiModeAsync(WifiMode mode)
+    {
+        var wifiOff = mode == WifiMode.Off;
+        await SetTopToolbarEnabledAsync(!wifiOff);
+        await SetStatusMessagesEnabledAsync(wifiOff);
+    }
+
     public async Task<string?> GetIpAddressAsync()
     {
         var response = await SendCommandAsync("AT+GIP", 500);
