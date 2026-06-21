@@ -2434,7 +2434,7 @@ public class BusyTagDevice(string? portName)
     {
         if (FirmwareVersionFloat >= 2.0 || (IsSandboxed && _useIOKit))
         {
-            var response = await SendCommandAsync($"AT+DF={fileName}", 300);
+            var response = await SendCommandAsync($"AT+DF={fileName}", 500);
             if (!response.Contains("OK") && !response.Contains("+DF:"))
             {
                 Debug.WriteLine($"Error deleting file: {fileName}");
