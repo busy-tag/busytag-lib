@@ -11,12 +11,32 @@ using BusyTag.Lib.Util.DevEventArgs;
 
 namespace BusyTag.Lib;
 
+/// <summary>
+/// Reason a connection attempt failed, raised via <see cref="BusyTagDevice.ConnectionError"/>.
+/// </summary>
+public enum ConnectionErrorType
+{
+    None = 0,
+    /// <summary>The serial port is held open by another application (access denied).</summary>
+    PortBusy,
+    /// <summary>The port no longer exists (device unplugged) or general I/O failure.</summary>
+    PortUnavailable,
+}
+
 // All the code in this file is included in all platforms.
 public class BusyTagDevice(string? portName)
 {
     private const int MaxFilenameLength = 50; // TODO: Need to recheck this
     private const long MaxCacheSizeBytes = 100 * 1024 * 1024; // 100 MB max cache size
     public event EventHandler<bool>? ConnectionStateChanged;
+    /// <summary>
+    /// Raised when a connection attempt fails for a reason worth surfacing to the user
+    /// (e.g. the port is busy because another app owns it). Distinct from
+    /// <see cref="ConnectionStateChanged"/>, which only reports successful open/close.
+    /// </summary>
+    public event EventHandler<ConnectionErrorType>? ConnectionError;
+    /// <summary>Last connection failure reason, or <see cref="ConnectionErrorType.None"/>.</summary>
+    public ConnectionErrorType LastConnectionError { get; private set; }
     public event EventHandler<bool>? ReceivedDeviceBasicInformation;
     public event EventHandler<LedArgs>? ReceivedSolidColor;
     // public event EventHandler<List<PatternLine>>? ReceivedPattern;
@@ -201,6 +221,8 @@ public class BusyTagDevice(string? portName)
         try
         {
             _serialPort.Open();
+            // Open succeeded — we own the port, so clear any prior failure state.
+            LastConnectionError = ConnectionErrorType.None;
             ConnectionStateChanged?.Invoke(this, IsConnected);
             if (!IsConnected)
             {
@@ -210,10 +232,23 @@ public class BusyTagDevice(string? portName)
 
             await InitializeDeviceAsync();
         }
+        catch (UnauthorizedAccessException e)
+        {
+            // "Access to the path 'COMxx' is denied." — the port is physically present
+            // (it was enumerated by VID/PID) but another application holds it open. Report
+            // this distinctly so the UI can warn the user instead of silently appearing
+            // connected.
+            Debug.WriteLine($"Error (port busy): {e.Message}");
+            LastConnectionError = ConnectionErrorType.PortBusy;
+            ConnectionError?.Invoke(this, ConnectionErrorType.PortBusy);
+        }
         catch (Exception e)
         {
-            // ConnectionStateChanged?.Invoke(this, IsConnected);
+            // IOException/FileNotFoundException here typically mean the port vanished
+            // (device unplugged mid-connect) — not actionable by the user.
             Debug.WriteLine($"Error: {e.Message}");
+            LastConnectionError = ConnectionErrorType.PortUnavailable;
+            ConnectionError?.Invoke(this, ConnectionErrorType.PortUnavailable);
         }
     }
 
