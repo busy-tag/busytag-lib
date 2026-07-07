@@ -1542,7 +1542,10 @@ public class BusyTagDevice(string? portName)
 
     public async Task<bool> SetWifiStationCredentialsAsync(string ssid, string password)
     {
-        var response = await SendCommandAsync($"AT+STA={ssid},{password}", 5000);
+        // AT+STA blocks in firmware until association + IP (~5 s on success, longer on slow
+        // DHCP) and emits +evn: lines (WIFI_CONNECTED, SC, PP) before its final OK, so keep
+        // reading past the first chunk instead of treating an event line as the response.
+        var response = await SendCommandAsync($"AT+STA={ssid},{password}", 15000, waitForFirstResponse: false);
         return response.Contains("OK");
     }
 
