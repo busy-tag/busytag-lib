@@ -2500,10 +2500,16 @@ public class BusyTagDevice(string? portName)
         return true;
     }
 
-    public bool FileExistsInDeviceStorage(string fileName)
+    public async Task<bool> FileExistsInDeviceStorageAsync(string fileName)
     {
         if (FirmwareVersionFloat >= 2.0)
         {
+            // Renew the file list so we don't answer from a stale snapshot.
+            // Skip the refresh while the device is writing to storage — the
+            // list is mid-change anyway and callers poll this in that state;
+            // fall back to the cached snapshot until the write completes.
+            if (!_isWritingToStorage) await GetFileListAsync();
+
             foreach (var item in FileList)
             {
                 if (item.Name == fileName) return true;
