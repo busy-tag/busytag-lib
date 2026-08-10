@@ -974,13 +974,19 @@ public class BusyTagDevice(string? portName)
                             }
                             else if (args[0].Equals("FU"))
                             {
-                                var progress = float.Parse(args[1].Remove(args[1].Length - 1));
-                                FirmwareUpdateStatus?.Invoke(this, progress);
+                                // TryParse: a chunk boundary can split an event line, and a
+                                // throw here aborts processing of the rest of this chunk.
+                                if (float.TryParse(args[1].Trim().TrimEnd('%'), NumberStyles.Float,
+                                        CultureInfo.InvariantCulture, out var progress))
+                                    FirmwareUpdateStatus?.Invoke(this, progress);
                             }
                             else if (args[0].Equals("PP"))
                             {
-                                _isPlayingPattern = int.Parse(args[1]) != 0;
-                                PlayPatternStatus?.Invoke(this, _isPlayingPattern);
+                                if (int.TryParse(args[1].Trim(), out var ppStatus))
+                                {
+                                    _isPlayingPattern = ppStatus != 0;
+                                    PlayPatternStatus?.Invoke(this, _isPlayingPattern);
+                                }
                             }
                             else if (args[0].Equals("SC") && args.Length >= 3 &&
                                      int.TryParse(args[1].Trim(), out var scLedBits))
@@ -1047,10 +1053,31 @@ public class BusyTagDevice(string? portName)
         }
     }
 
+    /// <summary>
+    /// Extracts the value following <paramref name="prefix"/> (e.g. "+DN:") from a command
+    /// response, reading only the line that carries the prefix. Responses can contain
+    /// interleaved async event lines (e.g. "+DL:OK,file.png" arriving mid-response), so
+    /// Split(':').Last()-style parsing reads whatever line happens to come last — returning
+    /// garbage or throwing, which the connect sequence escalates into a spurious
+    /// PortUnavailable disconnect. Returns null when no line starts with the prefix.
+    /// </summary>
+    private static string? ExtractResponseValue(string response, string prefix)
+    {
+        foreach (var rawLine in response.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.StartsWith(prefix, StringComparison.Ordinal))
+                return line[prefix.Length..].Trim();
+        }
+        return null;
+    }
+
     public async Task<string> GetDeviceNameAsync()
     {
         var response = await SendCommandAsync("AT+GDN");
-        DeviceName = response.Contains("+DN:busytag-") ? response.Split(':').Last() : "busytag";
+        DeviceName = ExtractResponseValue(response, "+DN:") is { } name && name.StartsWith("busytag-")
+            ? name
+            : "busytag";
         LocalHostAddress = $"http://{DeviceName}.local";
         return DeviceName;
     }
@@ -1058,29 +1085,32 @@ public class BusyTagDevice(string? portName)
     public async Task<string> GetManufactureNameAsync()
     {
         var response = await SendCommandAsync("AT+GMN");
-        ManufactureName = response.Contains("+MN:") ? response.Split(':').Last() : "SIA BUSY TAG";
+        ManufactureName = ExtractResponseValue(response, "+MN:") ?? "SIA BUSY TAG";
         return ManufactureName;
     }
 
     public async Task<string> GetDeviceIdAsync()
     {
         var response = await SendCommandAsync("AT+GID");
-        Id = response.Contains("+ID:") ? response.Split(':').Last() : "";
+        Id = ExtractResponseValue(response, "+ID:") ?? "";
         return Id;
     }
 
     public async Task<string> GetFirmwareVersionAsync()
     {
         var response = await SendCommandAsync("AT+GFV");
-        FirmwareVersion = response.Contains("+FV:") ? response.Split(':').Last() : "";
-        FirmwareVersionFloat = float.Parse(FirmwareVersion, CultureInfo.InvariantCulture);
+        FirmwareVersion = ExtractResponseValue(response, "+FV:") ?? "";
+        // Keep the previous FirmwareVersionFloat on a bad read: version checks
+        // (>= 2.0 branches) are safer on a stale value than on a reset-to-zero one.
+        if (float.TryParse(FirmwareVersion, NumberStyles.Float, CultureInfo.InvariantCulture, out var versionFloat))
+            FirmwareVersionFloat = versionFloat;
         return FirmwareVersion;
     }
 
     public async Task<string> GetHardwareVersionAsync()
     {
         var response = await SendCommandAsync("AT+GHV");
-        HardwareVersion = response.Contains("+HV:") ? response.Split(':').Last() : "1.0";
+        HardwareVersion = ExtractResponseValue(response, "+HV:") ?? "1.0";
         return HardwareVersion;
     }
 
@@ -1120,7 +1150,7 @@ public class BusyTagDevice(string? portName)
     public async Task<string> GetCurrentImageNameAsync()
     {
         var response = await SendCommandAsync("AT+SP?");
-        CurrentImageName = response.Contains("+SP:") ? response.Split(':').Last() : "";
+        CurrentImageName = ExtractResponseValue(response, "+SP:") ?? "";
         if (!string.IsNullOrEmpty(CurrentImageName) && !FileExistsInCache(CurrentImageName))
         {
             await GetFileAsync(CurrentImageName);
@@ -1165,8 +1195,18 @@ public class BusyTagDevice(string? portName)
             // Only update if we got a valid response (prevents overwriting with 0 on concurrent command conflicts)
             if (response.Contains("+TSS:"))
             {
-                var size = response.Split(':').Last();
-                TotalStorageSize = long.Parse(size);
+                // Extract the value directly after the +TSS: prefix, same as +FSS below.
+                // The response can carry interleaved async events (e.g. "+DL:OK,file.png"),
+                // so Split(':').Last() reads whatever happens to come last and throws —
+                // and during the connect sequence that FormatException is treated as a
+                // dead port, tearing down an otherwise healthy connection.
+                var tssIndex = response.IndexOf("+TSS:", StringComparison.Ordinal);
+                var valueStart = tssIndex + 5;
+                var valueEnd = valueStart;
+                while (valueEnd < response.Length && char.IsDigit(response[valueEnd]))
+                    valueEnd++;
+                if (valueEnd > valueStart && long.TryParse(response[valueStart..valueEnd], out var parsed))
+                    TotalStorageSize = parsed;
             }
         }
         else
@@ -1228,10 +1268,9 @@ public class BusyTagDevice(string? portName)
     public async Task<bool> PlayPatternAsync(bool allow, int repeatCount)
     {
         var response = await SendCommandAsync($"AT+PP={(allow ? 1 : 0)},{repeatCount:d}", 60, false);
-        if (response.Contains("+PP:"))
+        if (ExtractResponseValue(response, "+PP:") is { } value && int.TryParse(value, out var status))
         {
-            var value = response.Split(':').Last();
-            PlayPatternStatus?.Invoke(this, int.Parse(value) != 0);
+            PlayPatternStatus?.Invoke(this, status != 0);
         }
 
         return response.Contains("OK");
@@ -1240,10 +1279,14 @@ public class BusyTagDevice(string? portName)
     public async Task<int> GetDisplayBrightnessAsync()
     {
         var response = await SendCommandAsync("AT+DB?");
-        var brightnessString = response.Contains("+DB:") ? response.Split(':').Last() : "";
-        var brightness = int.Parse(brightnessString);
-        ReceivedDisplayBrightness?.Invoke(this, brightness);
-        return brightness;
+        // Runs during the connect sequence — a throwing parse here (contaminated or
+        // missing response) would be escalated to a spurious PortUnavailable disconnect.
+        if (ExtractResponseValue(response, "+DB:") is { } value && int.TryParse(value, out var brightness))
+        {
+            ReceivedDisplayBrightness?.Invoke(this, brightness);
+            return brightness;
+        }
+        return 0;
     }
 
     public async Task<bool> SetDisplayBrightnessAsync(int brightness)
@@ -2832,7 +2875,7 @@ public class BusyTagDevice(string? portName)
 
     private static LedArgs ParseSolidColor(string response)
     {
-        var value = response.Contains("+SC:") ? response.Split(':').Last() : "";
+        var value = ExtractResponseValue(response, "+SC:") ?? "";
         var parts = value.Split(',');
         if (parts.Length >= 2 && int.TryParse(parts[0], out var ledBits))
         {
@@ -2849,7 +2892,7 @@ public class BusyTagDevice(string? portName)
 
     private static WiFiConfig ParseWiFiConfig(string response)
     {
-        var value = response.Contains("+WC:") ? response.Split(':').Last() : "";
+        var value = ExtractResponseValue(response, "+WC:") ?? "";
         var parts = value.Split(',');
 
         return new WiFiConfig
@@ -2869,10 +2912,14 @@ public class BusyTagDevice(string? portName)
             var data = line.Substring(4);
             var parts = data.Split(',');
 
-            if (parts.Length >= 4)
+            if (parts.Length >= 4 &&
+                int.TryParse(parts[0].Trim(), out var ledBits) &&
+                int.TryParse(parts[2].Trim(), out var speed) &&
+                int.TryParse(parts[3].Trim(), out var delay))
             {
-                patterns.Add(new PatternLine(int.Parse(parts[0].Trim()), parts[1].Trim(),
-                    int.Parse(parts[2].Trim()), int.Parse(parts[3].Trim())));
+                // Skip malformed lines (chunk-split or contaminated) instead of throwing
+                // away the whole pattern list.
+                patterns.Add(new PatternLine(ledBits, parts[1].Trim(), speed, delay));
             }
         }
 
