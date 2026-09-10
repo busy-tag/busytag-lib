@@ -403,7 +403,7 @@ jobs:
           ## 📞 Support
           - 🐛 [Report Issues](https://github.com/busy-tag/busytag-lib/issues)
           - 💬 [Discussions](https://github.com/busy-tag/busytag-lib/discussions)
-          - 📧 [Email Support](mailto:support@busy-tag.com)
+          - 📧 [Email Support](mailto:support@busytag.com)
           EOF
           
           echo "Release notes created"

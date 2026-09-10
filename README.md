@@ -198,7 +198,7 @@ if (devices?.Any() == true)
 
 <div align="center">
 
-**Made with ❤️ by [SIA BUSY TAG](https://www.busy-tag.com)**
+**Made with ❤️ by [SIA BUSY TAG](https://www.busytag.com)**
 
 *Empowering developers to create amazing IoT experiences*
 
