@@ -1118,9 +1118,8 @@ public class BusyTagDevice(string? portName)
     {
         // Response format: +ESPCT:<compile_date> <compile_time>
         var response = await SendCommandAsync("AT+GESPCT");
-        CompileTime = response.Contains("+ESPCT:")
-            ? response[(response.IndexOf("+ESPCT:", StringComparison.Ordinal) + "+ESPCT:".Length)..].Trim()
-            : string.Empty;
+        // Line-based extraction keeps the trailing "OK" (and any other line) out of the value.
+        CompileTime = ExtractResponseValue(response, "+ESPCT:") ?? string.Empty;
         return CompileTime;
     }
 
