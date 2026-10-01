@@ -120,6 +120,8 @@ public class BusyTagDevice(string? portName)
     /// Returns true if the device is currently writing to storage (WIS,1 state)
     /// </summary>
     public bool IsWritingToStorage => _isWritingToStorage;
+    /// <summary>True while <see cref="SendNewFile"/> runs; commands sent meanwhile can derail its handshake.</summary>
+    public bool IsSendingFile => _sendingFile;
     private readonly CancellationTokenSource _ctsForConnection = new();
     private CancellationTokenSource _ctsForFileSending = new();
 
@@ -1273,6 +1275,32 @@ public class BusyTagDevice(string? portName)
         }
 
         return response.Contains("OK");
+    }
+
+    /// <summary>
+    /// Pattern lines stored on the device (AT+CP?). Empty when there are none or the
+    /// port was busy and the query was not sent.
+    /// </summary>
+    public async Task<List<PatternLine>> GetCustomPatternAsync()
+    {
+        var response = await SendCommandAsync("AT+CP?", 1000, false);
+        return ParseCustomPattern(response);
+    }
+
+    /// <summary>
+    /// Whether a pattern plays and its repeat count (AT+PP?, reply "+PP:&lt;0|1&gt;,&lt;repeat&gt;"
+    /// with no trailing OK). Null when the port was busy or the reply was unreadable.
+    /// </summary>
+    public async Task<(bool Playing, int RepeatCount)?> GetPlayPatternStatusAsync()
+    {
+        var response = await SendCommandAsync("AT+PP?", 300);
+        if (ExtractResponseValue(response, "+PP:") is not { } value) return null;
+        var parts = value.Split(',');
+        if (parts.Length < 2
+            || !int.TryParse(parts[0].Trim(), out var playing)
+            || !int.TryParse(parts[1].Trim(), out var repeat))
+            return null;
+        return (playing != 0, repeat);
     }
 
     public async Task<int> GetDisplayBrightnessAsync()
