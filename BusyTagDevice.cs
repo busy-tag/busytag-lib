@@ -1793,11 +1793,25 @@ public class BusyTagDevice(string? portName)
         return line?.Trim();
     }
 
-    public async Task<bool> StartWifiScanAsync()
+    /// <summary>
+    /// Starts a Wi-Fi scan. Optional filters are applied by firmware to the results that
+    /// AT+WSCAN? returns: <paramref name="ssidFilter"/> is a case-insensitive "name contains"
+    /// match, <paramref name="authFilter"/> a case-insensitive substring of the auth mode
+    /// string ("OPEN", "WPA2", "WPA3", …). Note "WPA2" also matches "WPA/WPA2" and "WPA2/WPA3".
+    /// </summary>
+    public async Task<bool> StartWifiScanAsync(string? ssidFilter = null, string? authFilter = null)
     {
         // Firmware accepts AT+WSCAN=[ssid_filter[,auth]]; the trailing '='
         // is required even with no filter — bare AT+WSCAN returns ERROR:1.
-        var response = await SendCommandAsync("AT+WSCAN=", 1000);
+        // It splits on the first comma, so a comma inside the name filter would leak into
+        // the auth filter — keep only the part before it (still a valid "contains" match).
+        var ssid = ssidFilter?.Trim() ?? string.Empty;
+        var comma = ssid.IndexOf(',');
+        if (comma >= 0) ssid = ssid[..comma];
+        var auth = authFilter?.Trim().Replace(",", string.Empty) ?? string.Empty;
+
+        var command = auth.Length > 0 ? $"AT+WSCAN={ssid},{auth}" : $"AT+WSCAN={ssid}";
+        var response = await SendCommandAsync(command, 1000);
         return response.Contains("OK");
     }
 
